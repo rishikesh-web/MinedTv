@@ -27,6 +27,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import com.example.minedtv.data.AppServices
 import com.example.minedtv.data.Clip
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.EnterTransition
@@ -55,6 +56,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import com.example.minedtv.ui.screens.*
 import com.example.minedtv.ui.share.ShareScreen
+import com.example.minedtv.ui.search.MomentSearchScreen
 import com.example.minedtv.ui.theme.Gold
 import com.example.minedtv.ui.theme.MinedTvTheme
 import com.example.minedtv.util.Logger
@@ -63,6 +65,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Logger.i("MainActivity created")
+        AppServices.init(this)
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(TRANSPARENT)
@@ -96,6 +99,7 @@ fun MinedTvApp() {
     var shareSession by remember { mutableIntStateOf(0) }
     // Saveable so rotating the phone doesn't replay the splash.
     var showSplash by rememberSaveable { mutableStateOf(true) }
+    var showMomentSearch by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(tab) { Logger.d("Screen: ${tab.label}") }
     LaunchedEffect(openClip) {
@@ -138,9 +142,9 @@ fun MinedTvApp() {
                         onNotifications = { tab = Tab.Inbox }
                     )
                     Tab.Explore -> ExploreScreen(onClipClick)
-                    Tab.Clipper -> ClipperScreen(onClipClick)
+                    Tab.Clipper -> ClipperScreen(onClipClick, onSearchClips = { showMomentSearch = true })
                     Tab.Inbox -> InboxScreen(onClipClick)
-                    Tab.Profile -> ProfileScreen(onClipClick)
+                    Tab.Profile -> ProfileScreen(onClipClick, onSearchClips = { showMomentSearch = true })
                 }
             }
         }
@@ -162,6 +166,25 @@ fun MinedTvApp() {
                     }
                 )
             }
+        }
+
+        // Semantic "search inside your clips"; sits under the share overlay so moments can be shared.
+        AnimatedVisibility(
+            visible = showMomentSearch,
+            enter = slideInVertically { it },
+            exit = slideOutVertically { it }
+        ) {
+            MomentSearchScreen(
+                onClose = {
+                    Logger.d("Clip search closed")
+                    showMomentSearch = false
+                },
+                onShareMoment = {
+                    Logger.d("Share opened from moment: ${it.title}")
+                    shareSession++
+                    shareClip = it
+                }
+            )
         }
 
         AnimatedVisibility(

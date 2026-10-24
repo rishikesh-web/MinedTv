@@ -93,7 +93,7 @@ fun ShareScreen(clip: Clip, sessionKey: Int, onClose: () -> Unit) {
                 ShareStep.Processing -> ProcessingStep(state, onRetry = vm::startEnhance, onCancel = { vm.back() })
                 ShareStep.Review -> ReviewStep(state, vm::setCaption, vm::toggleHashtag, vm::startEnhance, vm::publish)
                 ShareStep.Publishing -> PublishingStep(state, vm::publish)
-                ShareStep.Done -> DoneStep(state, onClose)
+                ShareStep.Done -> DoneStep(state, onClose, vm::publish)
             }
         }
     }
@@ -106,8 +106,8 @@ private fun titleFor(state: ShareUiState): String = when (state.step) {
     ShareStep.AiOptions -> "Enhance with AI"
     ShareStep.Processing -> "Enhancing…"
     ShareStep.Review -> "Review"
-    ShareStep.Publishing -> "Posting"
-    ShareStep.Done -> "Posted"
+    ShareStep.Publishing -> "Preparing"
+    ShareStep.Done -> if (state.openedInApp) "Finish in ${state.platform?.displayName}" else "Posted"
 }
 
 // ---------- Steps ----------
@@ -399,7 +399,7 @@ private fun PublishingStep(state: ShareUiState, onRetry: () -> Unit) {
     StepColumn(horizontalAlignment = Alignment.CenterHorizontally) {
         Spacer(Modifier.height(48.dp))
         PlatformIcon(platform, 88.dp)
-        Text("Posting to ${platform.displayName}…", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Text("Preparing video for ${platform.displayName}…", fontSize = 18.sp, fontWeight = FontWeight.Bold)
         LinearProgressIndicator(
             progress = { progress },
             modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(50)),
@@ -412,7 +412,7 @@ private fun PublishingStep(state: ShareUiState, onRetry: () -> Unit) {
 }
 
 @Composable
-private fun DoneStep(state: ShareUiState, onClose: () -> Unit) {
+private fun DoneStep(state: ShareUiState, onClose: () -> Unit, onReopen: () -> Unit) {
     val platform = state.platform ?: return
     val checkScale = remember { Animatable(0f) }
     LaunchedEffect(Unit) { checkScale.animateTo(1f, spring(dampingRatio = 0.4f, stiffness = 300f)) }
@@ -428,17 +428,41 @@ private fun DoneStep(state: ShareUiState, onClose: () -> Unit) {
         ) {
             Icon(Icons.Filled.Check, null, tint = Color.Black, modifier = Modifier.size(56.dp))
         }
-        Text("Posted to ${platform.displayName}!", fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
-        Text(
-            if (state.mode == ShareMode.AiEnhanced) "Your AI-enhanced clip is live." else "Your clip is live.",
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Spacer(Modifier.height(16.dp))
-        OutlinedButton(
-            onClick = { Logger.d("View post tapped: ${state.postUrl}") },
-            modifier = Modifier.fillMaxWidth().height(52.dp),
-            shape = RoundedCornerShape(14.dp)
-        ) { Text("View on ${platform.displayName}", color = Color.White) }
+        val clipKind = if (state.mode == ShareMode.AiEnhanced) "AI-enhanced clip" else "clip"
+        if (state.openedInApp) {
+            Text("Opened in ${platform.displayName}", fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
+            Text(
+                "Your $clipKind is loaded in ${platform.displayName}. Finish posting there.",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
+            if (state.captionCopied) {
+                NoticeCard(
+                    icon = Icons.Filled.ContentPaste,
+                    text = "Caption & hashtags copied. Long-press the caption box and paste.",
+                    action = null,
+                    onAction = {}
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            OutlinedButton(
+                onClick = {
+                    Logger.d("Reopen ${platform.displayName} tapped")
+                    onReopen()
+                },
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+                shape = RoundedCornerShape(14.dp)
+            ) { Text("Open ${platform.displayName} again", color = Color.White) }
+        } else {
+            Text("Posted to ${platform.displayName}!", fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
+            Text("Your $clipKind is live.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(16.dp))
+            OutlinedButton(
+                onClick = { Logger.d("View post tapped: ${state.postUrl}") },
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+                shape = RoundedCornerShape(14.dp)
+            ) { Text("View on ${platform.displayName}", color = Color.White) }
+        }
         PrimaryButton("Done", Icons.Filled.Check, onClose)
     }
     ConfettiBurst(Modifier.matchParentSize())

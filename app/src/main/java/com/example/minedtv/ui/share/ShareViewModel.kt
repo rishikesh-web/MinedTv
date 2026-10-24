@@ -29,6 +29,8 @@ data class ShareUiState(
     val selectedHashtags: Set<String> = emptySet(),
     val publishProgress: Float = 0f,
     val postUrl: String? = null,
+    val openedInApp: Boolean = false,
+    val captionCopied: Boolean = false,
     val error: String? = null
 )
 
@@ -127,7 +129,7 @@ class ShareViewModel(
         val platform = s.platform ?: return
         val videoUrl = s.result?.videoUrl ?: "minedtv://clips/${s.clip.id}"
         work?.cancel()
-        update { copy(step = ShareStep.Publishing, publishProgress = 0f, error = null) }
+        update { copy(step = ShareStep.Publishing, publishProgress = 0f, error = null, openedInApp = false) }
         Logger.i("Publishing to ${platform.displayName} (${s.mode})")
 
         work = viewModelScope.launch {
@@ -140,6 +142,10 @@ class ShareViewModel(
                         is PublishStatus.Published -> {
                             Logger.i("Published: ${status.postUrl}")
                             update { copy(step = ShareStep.Done, postUrl = status.postUrl) }
+                        }
+                        is PublishStatus.OpenedInApp -> {
+                            Logger.i("Handed off to ${status.appName}, caption copied=${status.captionCopied}")
+                            update { copy(step = ShareStep.Done, openedInApp = true, captionCopied = status.captionCopied) }
                         }
                         is PublishStatus.Failed -> {
                             Logger.w("Publish failed: ${status.message}")

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Files MinedTv shares with other apps (TikTok / Instagram) through FileProvider. -->
+<paths>
+    <cache-path name="share" path="share/" />
+</paths>

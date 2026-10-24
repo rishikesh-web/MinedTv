@@ -91,6 +91,8 @@ data class PublishRequest(
 sealed interface PublishStatus {
     data class Uploading(val progress: Float) : PublishStatus
     data class Published(val postUrl: String) : PublishStatus
+    /** Video was handed to the platform's app; the user finishes posting there. */
+    data class OpenedInApp(val appName: String, val captionCopied: Boolean) : PublishStatus
     data class Failed(val message: String) : PublishStatus
 }
 

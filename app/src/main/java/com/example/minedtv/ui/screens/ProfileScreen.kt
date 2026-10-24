@@ -33,9 +33,12 @@ import com.example.minedtv.ui.theme.Gold
 import com.example.minedtv.util.Logger
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.clickable
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Search
 
 @Composable
-fun ProfileScreen(onClipClick: (Clip) -> Unit) {
+fun ProfileScreen(onClipClick: (Clip) -> Unit, onSearchClips: () -> Unit) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     val clips = when (tab) {
         0 -> SampleData.myClips
@@ -56,6 +59,34 @@ fun ProfileScreen(onClipClick: (Clip) -> Unit) {
             ProfileHeader(scrollOffset = {
                 if (gridState.firstVisibleItemIndex == 0) gridState.firstVisibleItemScrollOffset else 0
             })
+        }
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            // Entry to semantic moment search over the user's own clips.
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(MaterialTheme.colorScheme.surface)
+                    .border(1.dp, Gold.copy(alpha = 0.4f), RoundedCornerShape(14.dp))
+                    .clickable {
+                        Logger.d("Profile: open clip search")
+                        onSearchClips()
+                    }
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Filled.AutoAwesome, null, tint = Gold, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Search inside your clips", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                    Text(
+                        "Try \"fortnite headshot\" to jump to the moment",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 12.sp
+                    )
+                }
+                Icon(Icons.Filled.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
         item(span = { GridItemSpan(maxLineSpan) }) {
             val tabs = listOf("Clips", "Highlights", "Liked")

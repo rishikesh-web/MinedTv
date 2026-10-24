@@ -43,7 +43,7 @@ import kotlinx.coroutines.delay
 import com.example.minedtv.util.Logger
 
 @Composable
-fun ClipperScreen(onClipClick: (Clip) -> Unit) {
+fun ClipperScreen(onClipClick: (Clip) -> Unit, onSearchClips: () -> Unit) {
     val context = LocalContext.current
     var recording by rememberSaveable { mutableStateOf(false) }
     var seconds by rememberSaveable { mutableIntStateOf(0) }
@@ -184,7 +184,7 @@ fun ClipperScreen(onClipClick: (Clip) -> Unit) {
         }
 
         Spacer(Modifier.height(20.dp))
-        SectionHeader("Recent captures", Modifier.padding(horizontal = 16.dp))
+        SectionHeader("Recent captures", Modifier.padding(horizontal = 16.dp), action = "Search moments", onAction = onSearchClips)
         Spacer(Modifier.height(8.dp))
         LazyRow(
             contentPadding = PaddingValues(horizontal = 16.dp),

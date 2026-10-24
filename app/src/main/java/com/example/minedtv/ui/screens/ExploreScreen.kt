@@ -36,22 +36,22 @@ import com.example.minedtv.ui.components.SectionHeader
 import com.example.minedtv.ui.theme.Gold
 import kotlinx.coroutines.delay
 import com.example.minedtv.util.Logger
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.ui.text.input.ImeAction
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.minedtv.data.search.SearchScope
+import com.example.minedtv.data.search.formatMs
+import com.example.minedtv.ui.search.SearchViewModel
 
 @Composable
 fun ExploreScreen(onClipClick: (Clip) -> Unit) {
-    var query by rememberSaveable { mutableStateOf("") }
-    // Debounced so we log the query, not every keystroke.
-    LaunchedEffect(query) {
-        if (query.isBlank()) return@LaunchedEffect
-        delay(500)
-        Logger.d("Explore search: \"$query\"")
-    }
-    val results = SampleData.clips.filter {
-        query.isBlank() ||
-            it.title.contains(query, ignoreCase = true) ||
-            it.game.contains(query, ignoreCase = true) ||
-            it.user.contains(query, ignoreCase = true)
-    }
+    // Global semantic search; the ViewModel debounces and logs queries.
+    val vm: SearchViewModel = viewModel(key = "search-global") { SearchViewModel(SearchScope.Global) }
+    val state by vm.state.collectAsState()
+    val query = state.query
+    val hits = state.response?.hits.orEmpty()
 
     LazyVerticalGrid(
         columns = GridCells.Fixed(2),
@@ -66,16 +66,18 @@ fun ExploreScreen(onClipClick: (Clip) -> Unit) {
         item(span = { GridItemSpan(maxLineSpan) }) {
             OutlinedTextField(
                 value = query,
-                onValueChange = { query = it },
+                onValueChange = vm::onQueryChange,
                 modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("Search clips, games, creators") },
+                placeholder = { Text("Search clips, games, moments") },
                 leadingIcon = { Icon(Icons.Outlined.Search, null) },
                 trailingIcon = {
                     if (query.isNotEmpty()) {
-                        IconButton(onClick = { query = "" }) { Icon(Icons.Filled.Close, "Clear") }
+                        IconButton(onClick = { vm.onQueryChange("") }) { Icon(Icons.Filled.Close, "Clear") }
                     }
                 },
                 singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = { vm.commit() }),
                 shape = RoundedCornerShape(14.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedContainerColor = MaterialTheme.colorScheme.surface,
@@ -91,19 +93,63 @@ fun ExploreScreen(onClipClick: (Clip) -> Unit) {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     items(SampleData.games) { game -> GameTile(game) {
                         Logger.d("Explore game tapped: ${game.name}")
-                        query = game.name
+                        vm.commit(game.name)
                     } }
                 }
             }
-        }
-        item(span = { GridItemSpan(maxLineSpan) }) {
-            SectionHeader(
-                if (query.isBlank()) "Trending Clips" else "${results.size} results",
-                action = null
-            )
-        }
-        items(results, key = { it.id }) { clip ->
-            ClipGridItem(clip) { onClipClick(clip) }
+            item(span = { GridItemSpan(maxLineSpan) }) { SectionHeader("Trending Clips", action = null) }
+            items(SampleData.clips, key = { it.id }) { clip ->
+                ClipGridItem(clip) { onClipClick(clip) }
+            }
+        } else {
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                Column {
+                    if (state.loading) {
+                        LinearProgressIndicator(Modifier.fillMaxWidth(), color = Gold, trackColor = Color.Transparent)
+                        Spacer(Modifier.height(8.dp))
+                    }
+                    val response = state.response
+                    SectionHeader(
+                        when {
+                            state.error != null -> "Search failed"
+                            response == null -> "Searching…"
+                            else -> "${hits.size} results"
+                        },
+                        action = if (state.error != null) "Retry" else null,
+                        onAction = vm::retry
+                    )
+                    val terms = response?.interpretation?.let { it.games + it.events }.orEmpty()
+                    if (terms.isNotEmpty()) {
+                        Row(Modifier.padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.AutoAwesome, null, tint = Gold, modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                "Understood as: ${terms.joinToString(" · ")}",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+                }
+            }
+            items(hits, key = { it.clip.id }) { hit ->
+                Column {
+                    ClipGridItem(hit.clip) { onClipClick(hit.clip) }
+                    // Where in the video the match happens, since titles may not mention it.
+                    hit.moments.firstOrNull()?.let { m ->
+                        Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.AutoAwesome, null, tint = Gold, modifier = Modifier.size(11.dp))
+                            Spacer(Modifier.width(3.dp))
+                            Text(
+                                "${m.label} at ${formatMs(m.startMs)}",
+                                color = Gold,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }

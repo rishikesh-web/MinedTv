@@ -80,7 +80,7 @@ object SampleData {
     }
 
     val currentUser = "ShadowSniper"
-    val myClips = clips.filter { it.user == currentUser } + clips.take(7)
+    val myClips = (clips.filter { it.user == currentUser } + clips.take(7)).distinctBy { it.id }
 
     val notifications = listOf(
         Notification("NovaQueen", "liked your clip", "2m", clips[0]),
