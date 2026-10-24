@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 12+ system splash: dark background so it hands off smoothly to the animated Compose splash. -->
+    <style name="Theme.MinedTv" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#FF0B0C10</item>
+        <item name="android:windowSplashScreenBackground">#FF0B0C10</item>
+        <item name="android:windowSplashScreenIconBackgroundColor">#FFFFC53D</item>
+    </style>
+</resources>
