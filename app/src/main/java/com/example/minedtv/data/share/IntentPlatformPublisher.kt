@@ -18,6 +18,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import com.example.minedtv.data.api.MinedTvApi
 
 /**
  * Real sharing without any platform developer setup: downloads the final video, copies the
@@ -40,7 +41,26 @@ class IntentPlatformPublisher(private val context: Context) : PlatformPublisher 
         }
 
         val file = File(context.cacheDir, "share").apply { mkdirs() }.resolve("minedtv_${System.currentTimeMillis()}.mp4")
-        if (request.videoUrl.startsWith("https://") && !request.videoUrl.contains("example.com")) {
+        val exportId = when {
+            !MinedTvApi.isConfigured || request.localPath != null -> null
+            request.remoteClipId != null -> request.remoteClipId
+            // A moment from search: save that range as a clip first, then export it.
+            request.sessionId != null && request.endMs > request.startMs ->
+                MinedTvApi.createClip(request.sessionId, request.startMs, request.endMs, request.title).remoteId
+            else -> null
+        }
+        if (request.localPath != null) {
+            // Recorded on this phone: share the file itself.
+            java.io.File(request.localPath).copyTo(file, overwrite = true)
+            emit(PublishStatus.Uploading(1f))
+        } else if (exportId != null) {
+            // Real clip: the server renders an MP4 (about a minute the first time), then we download it.
+            emit(PublishStatus.Uploading(0.05f))
+            val url = MinedTvApi.exportMp4(exportId) { polls ->
+                emit(PublishStatus.Uploading((0.1f + polls * 0.03f).coerceAtMost(0.45f)))
+            }
+            download(url, file) { emit(PublishStatus.Uploading(0.5f + it * 0.5f)) }
+        } else if (request.videoUrl.startsWith("https://") && !request.videoUrl.contains("example.com")) {
             download(request.videoUrl, file) { emit(PublishStatus.Uploading(it)) }
         } else {
             // No backend yet: use the bundled sample so the hand-off can be demoed end to end.

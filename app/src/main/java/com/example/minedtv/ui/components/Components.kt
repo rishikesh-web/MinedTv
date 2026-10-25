@@ -32,6 +32,8 @@ import com.example.minedtv.ui.theme.LiveRed
 import com.example.minedtv.util.Logger
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
+import coil3.compose.AsyncImage
+import androidx.compose.ui.layout.ContentScale
 
 @Composable
 fun MinedTvLogo(modifier: Modifier = Modifier) {
@@ -100,7 +102,14 @@ fun ClipThumbnail(item: Clip, modifier: Modifier = Modifier, compact: Boolean = 
             .clip(RoundedCornerShape(if (compact) 10.dp else 14.dp))
             .background(Brush.linearGradient(item.colors))
     ) {
-        Icon(
+        if (item.thumbnailUrl != null) {
+            AsyncImage(
+                model = item.thumbnailUrl,
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else Icon(
             Icons.Filled.SportsEsports, null,
             tint = Color.White.copy(alpha = 0.12f),
             modifier = Modifier

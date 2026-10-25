@@ -36,11 +36,37 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Insights
+import androidx.compose.material.icons.filled.ChevronRight
+import com.example.minedtv.data.api.MinedTvApi
+import com.example.minedtv.data.api.RemoteProfile
+import com.example.minedtv.data.formatCount
+import androidx.compose.ui.platform.LocalContext
+import com.example.minedtv.recorder.LocalClips
 
 @Composable
-fun ProfileScreen(onClipClick: (Clip) -> Unit, onSearchClips: () -> Unit) {
+fun ProfileScreen(onClipClick: (Clip) -> Unit, onSearchClips: () -> Unit, onDashboard: () -> Unit) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
-    val clips = when (tab) {
+    // Live: your real published clips, drafts, and recordings still only on this phone.
+    val live = MinedTvApi.isConfigured
+    val context = LocalContext.current
+    var remote by remember { mutableStateOf<List<Clip>?>(null) }
+    val local by LocalClips.clips.collectAsState()
+    LaunchedEffect(Unit) {
+        LocalClips.refresh(context)
+        if (live) runCatching { MinedTvApi.myClips("all") }
+            .onSuccess { remote = it.distinctBy { c -> c.id } }
+            .onFailure {
+                Logger.e("My clips failed", it)
+                remote = emptyList()
+            }
+    }
+    val tabs = if (live) listOf("Published", "Drafts", "On this phone") else listOf("Clips", "Highlights", "Liked")
+    val clips = if (live) when (tab) {
+        0 -> remote.orEmpty().filter { it.publishState == "published" }
+        1 -> remote.orEmpty().filter { it.publishState != "published" }
+        else -> local
+    } else when (tab) {
         0 -> SampleData.myClips
         1 -> SampleData.myClips.sortedByDescending { it.likes }.take(4)
         else -> SampleData.clips.filter { it.user != SampleData.currentUser }.take(6)
@@ -59,6 +85,33 @@ fun ProfileScreen(onClipClick: (Clip) -> Unit, onSearchClips: () -> Unit) {
             ProfileHeader(scrollOffset = {
                 if (gridState.firstVisibleItemIndex == 0) gridState.firstVisibleItemScrollOffset else 0
             })
+        }
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            // Entry to the creator dashboard (published vs drafts, stats, virality).
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(MaterialTheme.colorScheme.surface)
+                    .clickable {
+                        Logger.d("Profile: open creator dashboard")
+                        onDashboard()
+                    }
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(Icons.Filled.Insights, null, tint = Gold, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Creator dashboard", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                    Text(
+                        "Views over time, drafts and virality predictions",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 12.sp
+                    )
+                }
+                Icon(Icons.Filled.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
         item(span = { GridItemSpan(maxLineSpan) }) {
             // Entry to semantic moment search over the user's own clips.
@@ -89,11 +142,28 @@ fun ProfileScreen(onClipClick: (Clip) -> Unit, onSearchClips: () -> Unit) {
             }
         }
         item(span = { GridItemSpan(maxLineSpan) }) {
-            val tabs = listOf("Clips", "Highlights", "Liked")
             PillRow(tabs, tab, {
                 Logger.d("Profile tab: ${tabs[it]}")
                 tab = it
             })
+        }
+        if (live && (tab < 2 && remote == null)) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Gold) }
+            }
+        } else if (live && clips.isEmpty()) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                Text(
+                    when (tab) {
+                        0 -> "Nothing published yet. Publish a draft to share it on MinedTv."
+                        1 -> "No drafts. Recordings you upload land here first."
+                        else -> "No recordings on this phone yet. Start one from the Clip tab."
+                    },
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 14.sp,
+                    modifier = Modifier.padding(vertical = 24.dp)
+                )
+            }
         }
         items(clips, key = { "${tab}_${it.id}" }) { clip ->
             ClipGridItem(clip) { onClipClick(clip) }
@@ -104,6 +174,14 @@ fun ProfileScreen(onClipClick: (Clip) -> Unit, onSearchClips: () -> Unit) {
 @Composable
 private fun ProfileHeader(scrollOffset: () -> Int) {
     val user = SampleData.currentUser
+    // Real counts from the backend when configured; sample numbers otherwise.
+    var profile by remember { mutableStateOf<RemoteProfile?>(null) }
+    var totalViews by remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(Unit) {
+        if (!MinedTvApi.isConfigured) return@LaunchedEffect
+        runCatching { MinedTvApi.profile() }.onSuccess { profile = it }.onFailure { Logger.e("Profile failed", it) }
+        runCatching { MinedTvApi.myClips("published") }.onSuccess { list -> totalViews = list.sumOf { it.views } }
+    }
     Column {
         Box(Modifier.fillMaxWidth().height(176.dp)) {
             Box(
@@ -150,10 +228,11 @@ private fun ProfileHeader(scrollOffset: () -> Int) {
                 .padding(vertical = 12.dp),
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
-            Stat("128", "Clips")
-            Stat("24.5K", "Followers")
-            Stat("312", "Following")
-            Stat("1.2M", "Views")
+            val p = profile
+            Stat(p?.let { formatCount(it.publishedClipCount) } ?: "128", "Clips")
+            Stat(p?.let { formatCount(it.followerCount) } ?: "24.5K", "Followers")
+            Stat(p?.let { formatCount(it.followingCount) } ?: "312", "Following")
+            Stat(totalViews?.let { formatCount(it) } ?: if (p != null) "…" else "1.2M", "Views")
         }
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {

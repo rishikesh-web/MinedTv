@@ -12,7 +12,22 @@ data class Clip(
     val comments: Int,
     val duration: String,
     val age: String,
-    val colors: List<Color>
+    val colors: List<Color>,
+    // From the backend; null for sample data.
+    val remoteId: String? = null,
+    val sessionId: String? = null,
+    val playlistUrl: String? = null,
+    val thumbnailUrl: String? = null,
+    val startMs: Long = 0,
+    val endMs: Long = 0,
+    val likedByMe: Boolean = false,
+    /** Recorded on this phone; null for sample and backend clips. */
+    val localPath: String? = null,
+    /** Backend publish state: "draft", "ready" (queued for YouTube) or "published"; null for sample data. */
+    val publishState: String? = null,
+    val publishedAt: String? = null,
+    /** Backend id of the clip's creator (for follow). */
+    val userId: String? = null
 )
 
 data class Game(val name: String, val clips: Int, val colors: List<Color>)
@@ -21,7 +36,17 @@ data class Notification(val user: String, val text: String, val time: String, va
 
 data class Conversation(val user: String, val lastMessage: String, val time: String, val unread: Boolean)
 
-data class Comment(val user: String, val text: String, val likes: Int, val age: String)
+data class Comment(
+    val user: String,
+    val text: String,
+    val likes: Int,
+    val age: String,
+    // Backend comments only:
+    val id: String? = null,
+    val parentId: String? = null,
+    val canDelete: Boolean = false,
+    val replies: List<Comment> = emptyList()
+)
 
 // Placeholder content until a real backend exists.
 object SampleData {

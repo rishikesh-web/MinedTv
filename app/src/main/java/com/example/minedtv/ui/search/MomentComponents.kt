@@ -39,6 +39,8 @@ import com.example.minedtv.data.share.durationSeconds
 import com.example.minedtv.ui.components.ClipThumbnail
 import com.example.minedtv.ui.theme.Gold
 import kotlin.math.abs
+import coil3.compose.AsyncImage
+import androidx.compose.ui.layout.ContentScale
 
 /** Gradient "frame" for a moment; shifts per timestamp so moments look like different frames. */
 fun momentBrush(clip: Clip, moment: Moment): Brush {
@@ -112,7 +114,9 @@ fun MomentChip(clip: Clip, moment: Moment, onClick: () -> Unit) {
                 .clip(RoundedCornerShape(10.dp))
                 .background(momentBrush(clip, moment))
         ) {
-            Icon(
+            if (moment.thumbnailUrl != null) {
+                AsyncImage(moment.thumbnailUrl, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            } else Icon(
                 Icons.Filled.SportsEsports, null,
                 tint = Color.White.copy(alpha = 0.12f),
                 modifier = Modifier.align(Alignment.Center).size(44.dp)
@@ -227,6 +231,9 @@ fun MomentRow(clip: Clip, moment: Moment, onClick: () -> Unit) {
                 .clip(RoundedCornerShape(8.dp))
                 .background(momentBrush(clip, moment))
         ) {
+            moment.thumbnailUrl?.let {
+                AsyncImage(it, null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            }
             Text(
                 formatMs(moment.startMs),
                 modifier = Modifier

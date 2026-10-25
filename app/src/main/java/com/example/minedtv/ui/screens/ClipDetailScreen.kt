@@ -38,17 +38,111 @@ import com.example.minedtv.ui.theme.LiveRed
 import kotlinx.coroutines.delay
 import com.example.minedtv.util.Logger
 import com.example.minedtv.ui.components.LikeButton
+import com.example.minedtv.data.api.MinedTvApi
+import com.example.minedtv.ui.components.HlsPlayer
+import kotlinx.coroutines.launch
+import com.example.minedtv.recorder.LocalClips
+import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.Lock
 
 @Composable
 fun ClipDetailScreen(clip: Clip, onBack: () -> Unit, onClipClick: (Clip) -> Unit, onShare: (Clip) -> Unit) {
     var playing by remember(clip.id) { mutableStateOf(true) }
     var progress by remember(clip.id) { mutableFloatStateOf(0f) }
-    var liked by remember(clip.id) { mutableStateOf(false) }
+    var liked by remember(clip.id) { mutableStateOf(clip.likedByMe) }
+    val scope = rememberCoroutineScope()
+    var publishState by remember(clip.id) { mutableStateOf(clip.publishState) }
+    var publishBusy by remember(clip.id) { mutableStateOf(false) }
+
+    // Count a view on the backend for real clips.
+    LaunchedEffect(clip.id) {
+        clip.remoteId?.let { id -> runCatching { MinedTvApi.view(id) }.onFailure { Logger.e("View failed", it) } }
+    }
     var saved by remember(clip.id) { mutableStateOf(false) }
     var following by remember(clip.id) { mutableStateOf(false) }
+    var followerCount by remember(clip.id) { mutableStateOf<Int?>(null) }
     var draft by remember(clip.id) { mutableStateOf("") }
-    val comments = remember(clip.id) { SampleData.comments.toMutableStateList() }
+    // Backend clips use real comments and follows; sample clips keep the local demo behaviour.
+    val isRemote = clip.remoteId != null && MinedTvApi.isConfigured
+    val comments = remember(clip.id) { (if (isRemote) emptyList() else SampleData.comments).toMutableStateList() }
+    var commentCount by remember(clip.id) { mutableIntStateOf(clip.comments) }
+    var replyingTo by remember(clip.id) { mutableStateOf<Comment?>(null) }
+    val isOwn = clip.localPath != null || (clip.userId != null && clip.userId == MinedTvApi.userId)
+    // Phone recordings: upload to the backend, where they're processed into a draft.
+    var uploadSession by remember(clip.id) { mutableStateOf(clip.localPath?.let { LocalClips.uploadedSession(it) }) }
+    var uploadProgress by remember(clip.id) { mutableStateOf<Float?>(null) }
+    var uploadStatus by remember(clip.id) { mutableStateOf<String?>(null) }
+    var uploadError by remember(clip.id) { mutableStateOf<String?>(null) }
+    LaunchedEffect(uploadSession) {
+        val sid = uploadSession ?: return@LaunchedEffect
+        while (true) {
+            runCatching { MinedTvApi.sessionStatus(sid) }.onSuccess { uploadStatus = it }
+            if (uploadStatus == "ready" || uploadStatus == "failed") break
+            kotlinx.coroutines.delay(10_000)
+        }
+        Logger.d("Upload session $sid: $uploadStatus")
+    }
+    // "More from this game": real published clips when the backend is on.
+    var moreClips by remember(clip.id) { mutableStateOf<List<Clip>?>(null) }
+    LaunchedEffect(clip.id) {
+        if (MinedTvApi.isConfigured) runCatching { MinedTvApi.gameFeed(clip.game) }
+            .onSuccess { list -> moreClips = list.filter { it.remoteId != clip.remoteId } }
+            .onFailure { Logger.e("Game feed failed", it) }
+    }
     val totalSeconds = clip.duration.substringAfter(":").toInt()
+
+    LaunchedEffect(clip.id) {
+        if (!isRemote) return@LaunchedEffect
+        runCatching { MinedTvApi.comments(clip.remoteId!!) }
+            .onSuccess {
+                comments.clear()
+                comments.addAll(it)
+                Logger.d("Loaded ${it.size} comments for ${clip.remoteId}")
+            }
+            .onFailure { Logger.e("Comments failed", it) }
+        clip.userId?.takeIf { !isOwn }?.let { uid ->
+            runCatching { MinedTvApi.profile(uid) }.onSuccess {
+                following = it.followedByMe
+                followerCount = it.followerCount
+            }
+        }
+    }
+
+    fun toggleFollow(follow: Boolean) {
+        following = follow
+        Logger.d("${if (follow) "Followed" else "Unfollowed"} ${clip.user}")
+        val uid = clip.userId
+        if (isRemote && uid != null) scope.launch {
+            runCatching { MinedTvApi.follow(uid, follow) }
+                .onSuccess { (now, count) ->
+                    following = now
+                    followerCount = count
+                }
+                .onFailure {
+                    following = !follow
+                    Logger.e("Follow failed", it)
+                }
+        }
+    }
+
+    fun deleteComment(c: Comment) {
+        val id = c.id ?: return
+        scope.launch {
+            runCatching { MinedTvApi.deleteComment(id) }
+                .onSuccess {
+                    if (c.parentId == null) {
+                        comments.remove(c)
+                        commentCount -= 1 + c.replies.size
+                    } else {
+                        val i = comments.indexOfFirst { it.id == c.parentId }
+                        if (i >= 0) comments[i] = comments[i].copy(replies = comments[i].replies - c)
+                        commentCount -= 1
+                    }
+                    Logger.d("Deleted comment $id")
+                }
+                .onFailure { Logger.e("Delete comment failed", it) }
+        }
+    }
 
     // Fake playback progress.
     LaunchedEffect(playing, clip.id) {
@@ -67,7 +161,20 @@ fun ClipDetailScreen(clip: Clip, onBack: () -> Unit, onClipClick: (Clip) -> Unit
             .systemBarsPadding()
             .imePadding()
     ) {
-        // Player
+        // Player: real HLS video for backend clips, placeholder for sample data.
+        if (clip.playlistUrl != null) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(16f / 9f)
+                    .background(Color.Black)
+            ) {
+                HlsPlayer(clip.playlistUrl, Modifier.fillMaxSize())
+                IconButton(onClick = onBack, modifier = Modifier.align(Alignment.TopStart)) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White)
+                }
+            }
+        } else {
         Box(
             Modifier
                 .fillMaxWidth()
@@ -123,6 +230,7 @@ fun ClipDetailScreen(clip: Clip, onBack: () -> Unit, onClipClick: (Clip) -> Unit
             val elapsed = (progress * totalSeconds).toInt()
             Text("0:%02d / %s".format(elapsed, clip.duration), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+        }
 
         LazyColumn(Modifier.weight(1f)) {
             item {
@@ -135,13 +243,114 @@ fun ClipDetailScreen(clip: Clip, onBack: () -> Unit, onClipClick: (Clip) -> Unit
                     )
                 }
             }
+            // Owner controls: publish state of your own backend clip.
+            if (clip.localPath != null && MinedTvApi.isConfigured) item {
+                val sid = uploadSession
+                Row(
+                    Modifier
+                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surface)
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        if (sid != null) Icons.Filled.CloudDone else Icons.Filled.PhoneAndroid, null,
+                        tint = if (sid != null) Gold else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Column(Modifier.weight(1f).padding(vertical = 6.dp)) {
+                        Text(
+                            when {
+                                uploadProgress != null -> "Uploading… ${((uploadProgress ?: 0f) * 100).toInt()}%"
+                                sid == null -> "Only on this phone"
+                                uploadStatus == "ready" -> "Uploaded · in your drafts on MinedTv"
+                                uploadStatus == "failed" -> "Uploaded, but processing failed"
+                                else -> "Uploaded · processing (about a minute)…"
+                            },
+                            fontSize = 13.sp
+                        )
+                        uploadError?.let { Text(it, fontSize = 11.sp, color = LiveRed) }
+                        uploadProgress?.let {
+                            LinearProgressIndicator(
+                                progress = { it }, color = Gold,
+                                modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                            )
+                        }
+                    }
+                    if (sid == null && uploadProgress == null) {
+                        TextButton(onClick = {
+                            uploadProgress = 0f
+                            uploadError = null
+                            scope.launch {
+                                runCatching {
+                                    MinedTvApi.uploadRecording(java.io.File(clip.localPath), clip.game, clip.title) { uploadProgress = it }
+                                }.onSuccess {
+                                    LocalClips.markUploaded(clip.localPath, it)
+                                    uploadSession = it
+                                }.onFailure {
+                                    Logger.e("Upload failed", it)
+                                    uploadError = it.message ?: "Upload failed"
+                                }
+                                uploadProgress = null
+                            }
+                        }) { Text("Upload", color = Gold, fontWeight = FontWeight.Bold) }
+                    }
+                }
+            }
+            if (clip.remoteId != null && clip.publishState != null && isOwn) item {
+                val published = publishState == "published"
+                Row(
+                    Modifier
+                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surface)
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        if (published) Icons.Filled.Public else Icons.Filled.Lock, null,
+                        tint = if (published) Gold else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        if (published) "Published on MinedTv" else "Draft · only you can see this",
+                        fontSize = 13.sp,
+                        modifier = Modifier.weight(1f)
+                    )
+                    TextButton(
+                        enabled = !publishBusy,
+                        onClick = {
+                            publishBusy = true
+                            scope.launch {
+                                runCatching {
+                                    if (published) MinedTvApi.unpublish(clip.remoteId) else MinedTvApi.publish(clip.remoteId)
+                                }.onSuccess {
+                                    publishState = it.publishState
+                                    Logger.i("Clip ${clip.remoteId} is now ${it.publishState}")
+                                }.onFailure { Logger.e("Publish toggle failed", it) }
+                                publishBusy = false
+                            }
+                        }
+                    ) { Text(if (published) "Unpublish" else "Publish", color = Gold, fontWeight = FontWeight.Bold) }
+                }
+            }
             item {
                 Row(Modifier.padding(horizontal = 8.dp, vertical = 8.dp)) {
-                    LikeButton(liked, clip.likes + if (liked) 1 else 0) {
+                    val baseLikes = clip.likes - if (clip.likedByMe) 1 else 0
+                    LikeButton(liked, baseLikes + if (liked) 1 else 0) {
                         liked = !liked
+                        clip.remoteId?.let { id ->
+                            val now = liked
+                            scope.launch { runCatching { MinedTvApi.like(id, now) }.onFailure { Logger.e("Like failed", it) } }
+                        }
                         Logger.d("Clip ${if (liked) "liked" else "unliked"}: id=${clip.id}")
                     }
-                    StatAction(Icons.Outlined.ChatBubbleOutline, formatCount(clip.comments + comments.size - SampleData.comments.size))
+                    StatAction(Icons.Outlined.ChatBubbleOutline, formatCount(if (isRemote) commentCount else clip.comments + comments.size - SampleData.comments.size))
                     StatAction(Icons.Outlined.Share, "Share") { onShare(clip) }
                     StatAction(
                         if (saved) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
@@ -167,36 +376,48 @@ fun ClipDetailScreen(clip: Clip, onBack: () -> Unit, onClipClick: (Clip) -> Unit
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text(clip.user, fontWeight = FontWeight.Bold)
-                        Text("12.4K followers", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                        val followers = followerCount?.let { "${formatCount(it)} follower${if (it == 1) "" else "s"}" }
+                            ?: if (isRemote) "" else "12.4K followers"
+                        if (isOwn) Text("You", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                        else if (followers.isNotEmpty()) Text(followers, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                     }
-                    if (following) {
-                        OutlinedButton(onClick = {
-                            following = false
-                            Logger.d("Unfollowed ${clip.user}")
-                        }) { Text("Following", color = Color.White) }
-                    } else {
-                        Button(onClick = {
-                            following = true
-                            Logger.d("Followed ${clip.user}")
-                        }) { Text("Follow", fontWeight = FontWeight.Bold) }
+                    if (!isOwn) {
+                        if (following) {
+                            OutlinedButton(onClick = { toggleFollow(false) }) { Text("Following", color = Color.White) }
+                        } else {
+                            Button(onClick = { toggleFollow(true) }) { Text("Follow", fontWeight = FontWeight.Bold) }
+                        }
                     }
                 }
             }
-            item {
+            // Live: only real clips from this game (hidden when there are none); demo: sample clips.
+            val more = if (MinedTvApi.isConfigured) moreClips.orEmpty()
+            else SampleData.clips.filter { it.id != clip.id && it.game == clip.game }.ifEmpty { SampleData.clips.filter { it.id != clip.id } }.take(6)
+            if (more.isNotEmpty()) item {
                 SectionHeader("More ${clip.game} clips", Modifier.padding(16.dp), action = null)
                 LazyRow(
                     contentPadding = PaddingValues(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    items(SampleData.clips.filter { it.id != clip.id }.take(6)) { other ->
+                    items(more, key = { it.id }) { other ->
                         ClipGridItem(other, Modifier.width(170.dp)) { onClipClick(other) }
                     }
                 }
             }
             item {
-                SectionHeader("Comments", Modifier.padding(16.dp), action = null)
+                SectionHeader(if (isRemote) "Comments ($commentCount)" else "Comments", Modifier.padding(16.dp), action = null)
+                if (isRemote && comments.isEmpty()) {
+                    Text(
+                        "No comments yet. Be the first.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 13.sp,
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
+                }
             }
-            items(comments) { CommentRow(it) }
+            items(comments) { c ->
+                CommentRow(c, onReply = if (isRemote) ({ replyingTo = it }) else null, onDelete = ::deleteComment)
+            }
             item { Spacer(Modifier.height(16.dp)) }
         }
 
@@ -210,11 +431,16 @@ fun ClipDetailScreen(clip: Clip, onBack: () -> Unit, onClipClick: (Clip) -> Unit
         ) {
             Avatar(SampleData.currentUser, 32.dp)
             Spacer(Modifier.width(8.dp))
+            replyingTo?.let {
+                IconButton(onClick = { replyingTo = null }, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Filled.Close, "Cancel reply", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
             OutlinedTextField(
                 value = draft,
                 onValueChange = { draft = it },
                 modifier = Modifier.weight(1f),
-                placeholder = { Text("Add a comment…") },
+                placeholder = { Text(replyingTo?.let { "Reply to ${it.user}…" } ?: "Add a comment…") },
                 singleLine = true,
                 shape = RoundedCornerShape(50),
                 colors = OutlinedTextFieldDefaults.colors(
@@ -226,9 +452,30 @@ fun ClipDetailScreen(clip: Clip, onBack: () -> Unit, onClipClick: (Clip) -> Unit
             )
             IconButton(
                 onClick = {
-                    if (draft.isNotBlank()) {
-                        comments.add(0, Comment(SampleData.currentUser, draft.trim(), 0, "now"))
-                        Logger.d("Comment posted on clip ${clip.id}: \"${draft.trim()}\"")
+                    val text = draft.trim()
+                    if (text.isNotEmpty() && isRemote) {
+                        val parent = replyingTo
+                        draft = ""
+                        replyingTo = null
+                        scope.launch {
+                            runCatching { MinedTvApi.postComment(clip.remoteId!!, text, parent?.id) }
+                                .onSuccess { posted ->
+                                    if (parent == null) comments.add(0, posted)
+                                    else {
+                                        val i = comments.indexOfFirst { it.id == parent.id }
+                                        if (i >= 0) comments[i] = comments[i].copy(replies = comments[i].replies + posted)
+                                    }
+                                    commentCount++
+                                    Logger.d("Comment posted on clip ${clip.remoteId}${if (parent != null) " (reply)" else ""}")
+                                }
+                                .onFailure {
+                                    draft = text
+                                    Logger.e("Comment failed", it)
+                                }
+                        }
+                    } else if (text.isNotEmpty()) {
+                        comments.add(0, Comment(SampleData.currentUser, text, 0, "now"))
+                        Logger.d("Comment posted on clip ${clip.id}: \"$text\"")
                         draft = ""
                     }
                 }
@@ -240,9 +487,15 @@ fun ClipDetailScreen(clip: Clip, onBack: () -> Unit, onClipClick: (Clip) -> Unit
 }
 
 @Composable
-private fun CommentRow(comment: Comment) {
+private fun CommentRow(
+    comment: Comment,
+    onReply: ((Comment) -> Unit)? = null,
+    onDelete: (Comment) -> Unit = {},
+    isReply: Boolean = false
+) {
     var liked by remember { mutableStateOf(false) }
-    Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+    Column {
+    Row(Modifier.padding(start = if (isReply) 58.dp else 16.dp, end = 16.dp, top = 8.dp, bottom = 4.dp)) {
         Avatar(comment.user, 32.dp)
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
@@ -252,8 +505,27 @@ private fun CommentRow(comment: Comment) {
                 Text(comment.age, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
             }
             Text(comment.text, fontSize = 14.sp)
+            if (onReply != null || comment.canDelete) {
+                Row(Modifier.padding(top = 2.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                    if (onReply != null && !isReply) {
+                        Text(
+                            "Reply", fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.clickable { onReply(comment) }
+                        )
+                    }
+                    if (comment.canDelete) {
+                        Text(
+                            "Delete", fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+                            color = LiveRed.copy(alpha = 0.8f),
+                            modifier = Modifier.clickable { onDelete(comment) }
+                        )
+                    }
+                }
+            }
         }
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        // Backend comments have no likes (likes = -1).
+        if (comment.likes >= 0) Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(
                 if (liked) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder,
                 "Like",
@@ -268,5 +540,7 @@ private fun CommentRow(comment: Comment) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
+    }
+    comment.replies.forEach { CommentRow(it, onReply, onDelete, isReply = true) }
     }
 }

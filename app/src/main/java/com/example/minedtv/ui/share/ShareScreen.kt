@@ -152,7 +152,7 @@ private fun ModeStep(state: ShareUiState, onSelect: (ShareMode) -> Unit) {
         ModeCard(
             icon = Icons.Filled.AutoAwesome,
             title = "Enhance with AI",
-            subtitle = "We check what's trending on ${platform.displayName} right now and edit your clip to match.",
+            subtitle = "AI watches your clip, finds the best moment and edits it for ${platform.displayName}.",
             bullets = listOf(
                 "Reframed to ${platform.aspectRatio} around the action",
                 "Auto-generated captions",
@@ -211,7 +211,7 @@ private fun AiOptionsStep(state: ShareUiState, onOptions: (EnhanceOptions) -> Un
             ToggleRow(Icons.Filled.Crop, "Auto-reframe to ${platform.aspectRatio}", "Keeps the action centered", o.reframe) {
                 onOptions(o.copy(reframe = it))
             }
-            ToggleRow(Icons.Filled.ClosedCaption, "Auto captions", "Hook text + key moments", o.captions) {
+            ToggleRow(Icons.Filled.ClosedCaption, "Auto captions", "Hook line + the clip's dialogue", o.captions) {
                 onOptions(o.copy(captions = it))
             }
             if (o.captions) {
@@ -228,7 +228,7 @@ private fun AiOptionsStep(state: ShareUiState, onOptions: (EnhanceOptions) -> Un
             if (o.autoTrim) {
                 Column(Modifier.padding(start = 40.dp)) {
                     Text(
-                        "Target ${formatDuration(o.targetSeconds)} of ${state.clip.duration} · trending on ${platform.displayName}: ~${platform.idealSeconds}s",
+                        "Target ${formatDuration(o.targetSeconds)} of ${state.clip.duration} · sweet spot on ${platform.displayName}: ~${platform.idealSeconds}s",
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -240,7 +240,7 @@ private fun AiOptionsStep(state: ShareUiState, onOptions: (EnhanceOptions) -> Un
                     )
                 }
             }
-            ToggleRow(Icons.Filled.Tag, "Trending hashtags", "Picked from what's hot this week", o.trendHashtags) {
+            ToggleRow(Icons.Filled.Tag, "Trending hashtags", "Picked by AI for this clip", o.trendHashtags) {
                 onOptions(o.copy(trendHashtags = it))
             }
             ToggleRow(Icons.Filled.MusicNote, "Trending audio", "Mix a popular sound under game audio", o.trendingAudio) {
@@ -338,7 +338,8 @@ private fun ReviewStep(
                 state.clip,
                 vertical = result.aspectRatio != "16:9",
                 caption = result.captions.getOrNull(captionIndex)?.text,
-                badge = "AI"
+                badge = "AI",
+                videoPath = result.videoUrl.takeIf { it.startsWith("/") }
             )
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -603,6 +604,33 @@ private fun ModeCard(
     }
 }
 
+/** Muted, looping, controller-free playback of a local file (the AI edit preview). */
+@androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+@Composable
+private fun LoopingVideo(path: String, modifier: Modifier = Modifier) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val player = remember(path) {
+        androidx.media3.exoplayer.ExoPlayer.Builder(context).build().apply {
+            setMediaItem(androidx.media3.common.MediaItem.fromUri(android.net.Uri.fromFile(java.io.File(path))))
+            repeatMode = androidx.media3.common.Player.REPEAT_MODE_ONE
+            volume = 0f
+            prepare()
+            playWhenReady = true
+        }
+    }
+    DisposableEffect(player) { onDispose { player.release() } }
+    androidx.compose.ui.viewinterop.AndroidView(
+        factory = {
+            androidx.media3.ui.PlayerView(it).apply {
+                this.player = player
+                useController = false
+                resizeMode = androidx.media3.ui.AspectRatioFrameLayout.RESIZE_MODE_FIT
+            }
+        },
+        modifier = modifier
+    )
+}
+
 /** Mock phone frame showing how the post will look on a 9:16 feed. */
 @Composable
 private fun PhonePreview(
@@ -610,7 +638,9 @@ private fun PhonePreview(
     vertical: Boolean,
     caption: String?,
     badge: String? = null,
-    width: Dp = 190.dp
+    width: Dp = 190.dp,
+    /** The real rendered edit; its captions are burned in, so no overlay text is drawn. */
+    videoPath: String? = null
 ) {
     Box(
         Modifier
@@ -620,7 +650,9 @@ private fun PhonePreview(
             .background(Color.Black)
             .border(2.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(22.dp))
     ) {
-        if (vertical) {
+        if (videoPath != null) {
+            LoopingVideo(videoPath, Modifier.fillMaxSize())
+        } else if (vertical) {
             Box(Modifier.fillMaxSize().background(Brush.verticalGradient(clip.colors))) {
                 Icon(
                     Icons.Filled.SportsEsports, null,
@@ -643,7 +675,7 @@ private fun PhonePreview(
                 )
             }
         }
-        if (caption != null) {
+        if (caption != null && videoPath == null) {
             Text(
                 caption,
                 modifier = Modifier

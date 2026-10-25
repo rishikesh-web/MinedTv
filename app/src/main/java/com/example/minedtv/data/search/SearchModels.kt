@@ -20,7 +20,9 @@ data class Moment(
     val label: String,
     val description: String,
     /** 0..1 */
-    val confidence: Float
+    val confidence: Float,
+    /** Frame at the moment, from the backend; null for sample data. */
+    val thumbnailUrl: String? = null
 )
 
 data class SearchHit(

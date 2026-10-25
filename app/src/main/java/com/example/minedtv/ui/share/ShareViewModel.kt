@@ -89,7 +89,13 @@ class ShareViewModel(
                         game = s.clip.game,
                         sourceSeconds = s.clip.durationSeconds,
                         platform = platform,
-                        options = s.options
+                        options = s.options,
+                        remoteClipId = s.clip.remoteId,
+                        localPath = s.clip.localPath,
+                        sessionId = s.clip.sessionId,
+                        startMs = s.clip.startMs,
+                        endMs = s.clip.endMs,
+                        creator = s.clip.user
                     )
                 )
                 Logger.d("AI enhance job submitted: $jobId")
@@ -135,7 +141,17 @@ class ShareViewModel(
         work = viewModelScope.launch {
             try {
                 publisher.publish(
-                    PublishRequest(platform, videoUrl, s.caption, s.hashtags.filter { it in s.selectedHashtags })
+                    PublishRequest(
+                        platform, videoUrl, s.caption, s.hashtags.filter { it in s.selectedHashtags },
+                        remoteClipId = s.clip.remoteId,
+                        sessionId = s.clip.sessionId,
+                        startMs = s.clip.startMs,
+                        endMs = s.clip.endMs,
+                        title = s.clip.title,
+                        // A real AI edit is a rendered file on the phone; share that instead of the original.
+                        localPath = s.result?.videoUrl?.takeIf { s.mode == ShareMode.AiEnhanced && it.startsWith("/") }
+                            ?: s.clip.localPath
+                    )
                 ).collect { status ->
                     when (status) {
                         is PublishStatus.Uploading -> update { copy(publishProgress = status.progress) }

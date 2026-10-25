@@ -44,6 +44,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.minedtv.data.search.SearchScope
 import com.example.minedtv.data.search.formatMs
 import com.example.minedtv.ui.search.SearchViewModel
+import com.example.minedtv.data.api.MinedTvApi
 
 @Composable
 fun ExploreScreen(onClipClick: (Clip) -> Unit) {
@@ -52,6 +53,20 @@ fun ExploreScreen(onClipClick: (Clip) -> Unit) {
     val state by vm.state.collectAsState()
     val query = state.query
     val hits = state.response?.hits.orEmpty()
+    // Live: games and trending clips come from the real feed.
+    var feedClips by remember { mutableStateOf<List<Clip>?>(null) }
+    LaunchedEffect(Unit) {
+        if (MinedTvApi.isConfigured) runCatching { MinedTvApi.feed(limit = 50).first }
+            .onSuccess { feedClips = it }
+            .onFailure { Logger.e("Explore feed failed", it) }
+    }
+    val live = feedClips?.isNotEmpty() == true
+    val games = if (live) feedClips.orEmpty().groupBy { it.game }
+        .map { (name, list) -> Game(name, list.size, MinedTvApi.colorsFor(name)) }
+        .sortedByDescending { it.clips }
+    else SampleData.games
+    val trending = if (live) feedClips.orEmpty().sortedByDescending { it.views + it.likes * 3 + it.comments * 5 }
+    else SampleData.clips
 
     LazyVerticalGrid(
         columns = GridCells.Fixed(2),
@@ -91,14 +106,14 @@ fun ExploreScreen(onClipClick: (Clip) -> Unit) {
             item(span = { GridItemSpan(maxLineSpan) }) { SectionHeader("Popular Games") }
             item(span = { GridItemSpan(maxLineSpan) }) {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    items(SampleData.games) { game -> GameTile(game) {
+                    items(games) { game -> GameTile(game) {
                         Logger.d("Explore game tapped: ${game.name}")
                         vm.commit(game.name)
                     } }
                 }
             }
             item(span = { GridItemSpan(maxLineSpan) }) { SectionHeader("Trending Clips", action = null) }
-            items(SampleData.clips, key = { it.id }) { clip ->
+            items(trending, key = { it.id }) { clip ->
                 ClipGridItem(clip) { onClipClick(clip) }
             }
         } else {
@@ -179,7 +194,7 @@ private fun GameTile(game: Game, onClick: () -> Unit) {
                 .padding(10.dp)
         ) {
             Text(game.name, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp, maxLines = 1)
-            Text("${formatCount(game.clips)} clips", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp)
+            Text("${formatCount(game.clips)} clip${if (game.clips == 1) "" else "s"}", color = Color.White.copy(alpha = 0.7f), fontSize = 11.sp)
         }
     }
 }

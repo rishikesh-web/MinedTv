@@ -32,7 +32,7 @@ data class EnhanceOptions(
 )
 
 enum class EnhanceStage(val label: String) {
-    AnalyzingTrends("Analyzing current trends"),
+    AnalyzingTrends("Watching the clip with AI"),
     DetectingHighlights("Finding the best moment"),
     Reframing("Reframing to 9:16"),
     Captioning("Generating captions"),
@@ -57,7 +57,15 @@ data class EnhanceRequest(
     val game: String,
     val sourceSeconds: Int,
     val platform: SharePlatform,
-    val options: EnhanceOptions
+    val options: EnhanceOptions,
+    /** Real video sources (any one); none = sample clip, simulated edit. */
+    val remoteClipId: String? = null,
+    val localPath: String? = null,
+    val sessionId: String? = null,
+    val startMs: Long = 0,
+    val endMs: Long = 0,
+    /** Handle shown on the MinedTv end card. */
+    val creator: String = ""
 )
 
 data class CaptionSegment(val startMs: Long, val endMs: Long, val text: String)
@@ -85,7 +93,16 @@ data class PublishRequest(
     val platform: SharePlatform,
     val videoUrl: String,
     val caption: String,
-    val hashtags: List<String>
+    val hashtags: List<String>,
+    /** Backend clip to export as MP4; null for sample clips. */
+    val remoteClipId: String? = null,
+    /** A session range to save as a clip first (e.g. a search moment), then export. */
+    val sessionId: String? = null,
+    val startMs: Long = 0,
+    val endMs: Long = 0,
+    val title: String = "",
+    /** A clip recorded on this phone: shared directly from this file. */
+    val localPath: String? = null
 )
 
 sealed interface PublishStatus {

@@ -60,12 +60,21 @@ import com.example.minedtv.ui.search.MomentSearchScreen
 import com.example.minedtv.ui.theme.Gold
 import com.example.minedtv.ui.theme.MinedTvTheme
 import com.example.minedtv.util.Logger
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
+import com.example.minedtv.data.api.MinedTvApi
+import com.example.minedtv.ui.dashboard.DashboardScreen
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Logger.i("MainActivity created")
         AppServices.init(this)
+        if (MinedTvApi.isConfigured) lifecycleScope.launch {
+            runCatching { MinedTvApi.warmup() }
+                .onSuccess { Logger.d("Backend warmed up") }
+                .onFailure { Logger.w("Warmup failed: ${it.message}") }
+        }
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(TRANSPARENT)
@@ -100,6 +109,7 @@ fun MinedTvApp() {
     // Saveable so rotating the phone doesn't replay the splash.
     var showSplash by rememberSaveable { mutableStateOf(true) }
     var showMomentSearch by rememberSaveable { mutableStateOf(false) }
+    var showDashboard by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(tab) { Logger.d("Screen: ${tab.label}") }
     LaunchedEffect(openClip) {
@@ -144,7 +154,11 @@ fun MinedTvApp() {
                     Tab.Explore -> ExploreScreen(onClipClick)
                     Tab.Clipper -> ClipperScreen(onClipClick, onSearchClips = { showMomentSearch = true })
                     Tab.Inbox -> InboxScreen(onClipClick)
-                    Tab.Profile -> ProfileScreen(onClipClick, onSearchClips = { showMomentSearch = true })
+                    Tab.Profile -> ProfileScreen(
+                        onClipClick,
+                        onSearchClips = { showMomentSearch = true },
+                        onDashboard = { showDashboard = true }
+                    )
                 }
             }
         }
@@ -166,6 +180,18 @@ fun MinedTvApp() {
                     }
                 )
             }
+        }
+
+        // Creator dashboard (MinedTv stats, drafts, virality predictions).
+        AnimatedVisibility(
+            visible = showDashboard,
+            enter = slideInVertically { it },
+            exit = slideOutVertically { it }
+        ) {
+            DashboardScreen(onClose = {
+                Logger.d("Dashboard closed")
+                showDashboard = false
+            })
         }
 
         // Semantic "search inside your clips"; sits under the share overlay so moments can be shared.

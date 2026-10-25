@@ -32,6 +32,10 @@ import com.example.minedtv.util.Logger
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.random.Random
+import com.example.minedtv.data.api.MinedTvApi
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.Color
 
 // Only show the skeleton on the very first load, not every time the tab is revisited.
 private var feedLoadedOnce = false
@@ -55,8 +59,45 @@ fun HomeScreen(onClipClick: (Clip) -> Unit, onSearch: () -> Unit, onNotification
         }
     }
 
-    val clips = remember(feed, seed) {
-        if (feed == 0 && seed == 0) SampleData.clips else SampleData.clips.shuffled(Random(feed * 31 + seed))
+    // Live: every tab is built from real published clips (sample clips only without a backend).
+    var remote by remember { mutableStateOf<List<Clip>>(emptyList()) }
+    LaunchedEffect(seed) {
+        if (!MinedTvApi.isConfigured) return@LaunchedEffect
+        runCatching { MinedTvApi.feed(limit = 50).first }
+            .onSuccess {
+                remote = it
+                Logger.d("Feed: ${it.size} clips from backend")
+            }
+            .onFailure { Logger.e("Feed failed", it) }
+    }
+    // "Following" tab: real clips from creators the user follows (no sample filler).
+    val live = MinedTvApi.isConfigured
+    var following by remember { mutableStateOf<List<Clip>?>(null) }
+    LaunchedEffect(feed, seed) {
+        if (!live || feed != 1) return@LaunchedEffect
+        runCatching { MinedTvApi.followingFeed() }
+            .onSuccess {
+                following = it
+                Logger.d("Following feed: ${it.size} clips")
+            }
+            .onFailure { Logger.e("Following feed failed", it) }
+    }
+    // Unread notifications for the bell badge.
+    var unread by remember { mutableIntStateOf(0) }
+    LaunchedEffect(seed) {
+        if (live) runCatching { MinedTvApi.unreadCount() }.onSuccess { unread = it }
+    }
+    val clips = remember(feed, seed, remote, following) {
+        if (live && feed == 1) following.orEmpty()
+        else if (live && remote.isNotEmpty()) when (feed) {
+            // Trending: engagement score; comments and likes count more than views.
+            2 -> remote.sortedByDescending { it.views + it.likes * 3 + it.comments * 5 }
+            // New: most recently published first.
+            3 -> remote.sortedByDescending { it.publishedAt ?: "" }
+            // For You: a fresh mix on every refresh.
+            else -> if (seed == 0) remote else remote.shuffled(Random(seed))
+        }
+        else remote + if (feed == 0 && seed == 0) SampleData.clips else SampleData.clips.shuffled(Random(feed * 31 + seed))
     }
 
     PullToRefreshBox(
@@ -94,13 +135,20 @@ fun HomeScreen(onClipClick: (Clip) -> Unit, onSearch: () -> Unit, onNotification
                     IconButton(onClick = onSearch) { Icon(Icons.Outlined.Search, "Search") }
                     IconButton(onClick = onNotifications) {
                         Box {
-                            Icon(Icons.Outlined.Notifications, "Notifications")
-                            Box(
-                                Modifier
-                                    .align(Alignment.TopEnd)
-                                    .size(8.dp)
-                                    .background(LiveRed, CircleShape)
-                            )
+                            Icon(Icons.Outlined.Notifications, if (unread > 0) "$unread unread notifications" else "Notifications")
+                            if (unread > 0 || !live) {
+                                Box(
+                                    Modifier
+                                        .align(Alignment.TopEnd)
+                                        .offset(x = 4.dp, y = (-4).dp)
+                                        .defaultMinSize(minWidth = 16.dp, minHeight = 16.dp)
+                                        .background(LiveRed, CircleShape)
+                                        .padding(horizontal = 3.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (live) Text(if (unread > 9) "9+" else "$unread", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                }
+                            }
                         }
                     }
                 }
@@ -118,8 +166,17 @@ fun HomeScreen(onClipClick: (Clip) -> Unit, onSearch: () -> Unit, onNotification
                         .padding(horizontal = 16.dp, vertical = 8.dp)
                 )
             }
-            if (loading) {
+            if (loading || (live && feed == 1 && following == null)) {
                 items(3) { ClipCardSkeleton() }
+            } else if (live && feed == 1 && clips.isEmpty()) {
+                item {
+                    Text(
+                        "Nothing here yet. Follow creators from their clips and their new clips will show up here.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 14.sp,
+                        modifier = Modifier.padding(24.dp)
+                    )
+                }
             } else {
                 items(clips, key = { it.id }) { clip ->
                     Column(Modifier.animateItem()) {

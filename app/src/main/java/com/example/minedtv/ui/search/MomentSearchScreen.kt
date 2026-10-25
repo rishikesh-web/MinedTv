@@ -51,6 +51,9 @@ import com.example.minedtv.ui.theme.Gold
 import com.example.minedtv.ui.theme.OnlineGreen
 import com.example.minedtv.util.Logger
 import kotlinx.coroutines.delay
+import com.example.minedtv.data.api.MinedTvApi
+import com.example.minedtv.ui.components.HlsPlayer
+import kotlinx.coroutines.launch
 
 private val Suggestions = listOf(
     "fortnite headshot", "valorant clutch", "sniper shots", "apex revive",
@@ -73,6 +76,17 @@ fun MomentSearchScreen(onClose: () -> Unit, onShareMoment: (Clip) -> Unit) {
     var lastPlaying by remember { mutableIntStateOf(0) }
     playing?.let { lastPlaying = it }
     val focus = remember { FocusRequester() }
+    // The user's real clips from the backend (search runs against these); sample library as fallback.
+    var library by remember { mutableStateOf(if (MinedTvApi.isConfigured) emptyList() else MyLibrary.clips) }
+    LaunchedEffect(Unit) {
+        if (!MinedTvApi.isConfigured) return@LaunchedEffect
+        runCatching { MinedTvApi.userClips() }
+            .onSuccess { library = it }
+            .onFailure {
+                Logger.e("Library load failed", it)
+                library = MyLibrary.clips
+            }
+    }
 
     LaunchedEffect(Unit) { if (state.query.isEmpty()) focus.requestFocus() }
     BackHandler {
@@ -93,7 +107,7 @@ fun MomentSearchScreen(onClose: () -> Unit, onShareMoment: (Clip) -> Unit) {
                 Column(Modifier.weight(1f)) {
                     Text("Search your clips", fontSize = 18.sp, fontWeight = FontWeight.Bold)
                     Text(
-                        "${MyLibrary.clips.size} clips indexed · finds moments inside videos",
+                        "${library.size} clips indexed · finds moments inside videos",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 12.sp
                     )
@@ -134,7 +148,7 @@ fun MomentSearchScreen(onClose: () -> Unit, onShareMoment: (Clip) -> Unit) {
                 state.error != null -> CenteredMessage(Icons.Filled.ErrorOutline, "Search failed", state.error ?: "") {
                     TextButton(onClick = vm::retry) { Text("Retry", color = Gold) }
                 }
-                state.query.isBlank() -> IdleContent(state.recent) { vm.commit(it) }
+                state.query.isBlank() -> IdleContent(state.recent, library) { vm.commit(it) }
                 response == null -> Unit
                 response.hits.isEmpty() && !state.loading -> CenteredMessage(
                     Icons.Filled.SearchOff,
@@ -235,7 +249,7 @@ private fun InterpretationRow(games: List<String>, events: List<String>) {
 }
 
 @Composable
-private fun IdleContent(recent: List<String>, onPick: (String) -> Unit) {
+private fun IdleContent(recent: List<String>, library: List<Clip>, onPick: (String) -> Unit) {
     LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Text("Try searching for what happens in a clip", fontWeight = FontWeight.Bold)
@@ -270,7 +284,7 @@ private fun IdleContent(recent: List<String>, onPick: (String) -> Unit) {
             }
         }
         item { Text("Your library", fontWeight = FontWeight.Bold) }
-        items(MyLibrary.clips, key = { it.id }) { clip ->
+        items(library, key = { it.id }) { clip ->
             Row(verticalAlignment = Alignment.CenterVertically) {
                 ClipThumbnail(clip, Modifier.width(96.dp), compact = true)
                 Spacer(Modifier.width(12.dp))
@@ -320,6 +334,7 @@ private fun MomentPlayer(
     onShare: (Clip) -> Unit
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val durationMs = clip.durationSeconds * 1000L
     // Start a second early so the action has context.
     val startMs = (moment.startMs - 1000).coerceAtLeast(0)
@@ -344,6 +359,29 @@ private fun MomentPlayer(
             IconButton(onClick = onClose) { Icon(Icons.Filled.Close, "Close") }
             Text("Moment ${index + 1} of $total", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
         }
+        if (clip.playlistUrl != null) {
+            // Real video, starting just before the matched second.
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(16f / 9f)
+                    .background(Color.Black)
+            ) {
+                HlsPlayer(clip.playlistUrl, Modifier.fillMaxSize(), seekToMs = startMs)
+                Row(
+                    Modifier
+                        .align(Alignment.TopStart)
+                        .padding(12.dp)
+                        .background(Gold, RoundedCornerShape(6.dp))
+                        .padding(horizontal = 8.dp, vertical = 3.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Filled.AutoAwesome, null, tint = Color.Black, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text(moment.label, color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
+                }
+            }
+        } else
         Box(
             Modifier
                 .fillMaxWidth()
@@ -409,7 +447,7 @@ private fun MomentPlayer(
                 durationMs,
                 allMoments.ifEmpty { listOf(moment) },
                 highlighted = moment,
-                positionMs = positionMs,
+                positionMs = if (clip.playlistUrl != null) null else positionMs,
                 height = 12.dp
             )
             Text(
@@ -463,8 +501,22 @@ private fun MomentPlayer(
             }
             OutlinedButton(
                 onClick = {
+                    val momentClip = momentAsClip(clip, moment, index)
                     Logger.i("Save moment as clip: clip=${clip.id} ${formatMs(moment.startMs)}-${formatMs(moment.endMs)}")
-                    Toast.makeText(context, "Saved ${moment.label} as a new clip", Toast.LENGTH_SHORT).show()
+                    val sessionId = momentClip.sessionId
+                    if (sessionId == null || !MinedTvApi.isConfigured) {
+                        Toast.makeText(context, "Saved ${moment.label} as a new clip", Toast.LENGTH_SHORT).show()
+                    } else scope.launch {
+                        runCatching { MinedTvApi.createClip(sessionId, momentClip.startMs, momentClip.endMs, momentClip.title) }
+                            .onSuccess {
+                                Logger.i("Saved clip ${it.remoteId} (${it.duration})")
+                                Toast.makeText(context, "Saved to your clips", Toast.LENGTH_SHORT).show()
+                            }
+                            .onFailure {
+                                Logger.e("Save clip failed", it)
+                                Toast.makeText(context, "Couldn't save the clip", Toast.LENGTH_SHORT).show()
+                            }
+                    }
                 },
                 modifier = Modifier.fillMaxWidth().height(48.dp),
                 shape = RoundedCornerShape(14.dp)
@@ -477,10 +529,19 @@ private fun MomentPlayer(
     }
 }
 
-/** A short clip cut around a moment (with 2s of padding each side), ready for the share flow. */
+/**
+ * A short clip cut around a moment (with 2s of padding each side), ready for the share flow.
+ * For backend results it carries the session range, so sharing saves and exports exactly that.
+ */
 private fun momentAsClip(clip: Clip, moment: Moment, index: Int): Clip {
     val seconds = (((moment.endMs - moment.startMs) / 1000) + 4).toInt().coerceAtLeast(5)
+    val rangeStart = (clip.startMs + moment.startMs - 2_000).coerceAtLeast(0)
     return clip.copy(
+        remoteId = null,
+        playlistUrl = null,
+        thumbnailUrl = moment.thumbnailUrl ?: clip.thumbnailUrl,
+        startMs = rangeStart,
+        endMs = rangeStart + seconds * 1000L,
         id = 10_000 + clip.id * 100 + index,
         title = "${moment.description} - ${clip.title}",
         views = 0,
