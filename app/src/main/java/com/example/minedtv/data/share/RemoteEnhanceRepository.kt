@@ -130,10 +130,10 @@ class RemoteEnhanceRepository(
         val platform = when (request.platform) { SharePlatform.TikTok -> "tiktok"; SharePlatform.InstagramReels -> "instagram"; SharePlatform.MinedIt -> "general" }
         val style = o.captionStyle.name.lowercase()
         val mode = if (o.montage) "montage" else "single"
-        val body = JSONObject().put("platform", platform).put("mode", mode)
+        val body = JSONObject().put("platform", platform).put("mode", mode).put("music", o.music)
             .put("captions", o.captions).put("caption_style", style).put("hook", o.captions)
         // The GET must repeat the POST's options exactly.
-        val query = "platform=$platform&mode=$mode&captions=${o.captions}&caption_style=$style&hook=${o.captions}"
+        val query = "platform=$platform&mode=$mode&captions=${o.captions}&caption_style=$style&hook=${o.captions}&music=${o.music}"
 
         var r = try {
             MinedTvApi.post("/clips/$clipId/highlights", body)
@@ -194,6 +194,9 @@ class RemoteEnhanceRepository(
                 add((if (o.montage) "Moment $from–$to: " else "Picked $from–$to: ") + m.optString("reason"))
             }
             add("Reframed to 9:16 and edited on MinedIt's servers")
+            r.optJSONObject("music")?.takeIf { r.optBoolean("music_mixed") }?.let { m ->
+                add("Added \u201c${m.optString("title")}\u201d by ${m.optString("artist")} (${m.optString("mood")}), quieter under speech")
+            }
             if (captions.isNotEmpty()) add("Burned in ${captions.size} caption lines" + if (o.captions) ", opening with a hook" else "")
             if (out != server) add("Ends with a 2.5s MinedIt end card crediting @${request.creator.lowercase()}")
         }
@@ -205,6 +208,7 @@ class RemoteEnhanceRepository(
             aspectRatio = if (h > w) "9:16" else "16:9",
             captions = captions,
             suggestedCaption = r.optString("suggested_caption").takeIf { it.isNotBlank() && it != "null" } ?: request.title,
+            musicCredit = r.optJSONObject("music")?.takeIf { r.optBoolean("music_mixed") }?.optString("credit")?.takeIf { it.isNotBlank() },
             hashtags = hashtags,
             trendInsights = insights
         )

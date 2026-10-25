@@ -144,7 +144,7 @@ fun ProfileScreen(onClipClick: (Clip) -> Unit, onSearchClips: () -> Unit, onDash
             }
         }
         item(span = { GridItemSpan(maxLineSpan) }) {
-            PillRow(tabs, tab, {
+            PillRow(tabs, tab, scrollable = true, onSelect = {
                 Logger.d("Profile tab: ${tabs[it]}")
                 tab = it
             })

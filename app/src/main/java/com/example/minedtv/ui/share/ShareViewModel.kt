@@ -34,7 +34,11 @@ data class ShareUiState(
     val error: String? = null,
     /** "Post as a MinedIt Reel" progress: null = not started, then a status line, "Posted" or "Failed: …". */
     val reel: String? = null
-)
+) {
+    /** The caption as posted: the CC BY music credit is appended when the edit has music. */
+    val captionWithCredit: String
+        get() = result?.musicCredit?.takeIf { mode == ShareMode.AiEnhanced && it !in caption }?.let { caption + "\n\nMusic: " + it } ?: caption
+}
 
 class ShareViewModel(
     clip: Clip,
@@ -153,7 +157,7 @@ class ShareViewModel(
             try {
                 publisher.publish(
                     PublishRequest(
-                        platform, videoUrl, s.caption, s.hashtags.filter { it in s.selectedHashtags },
+                        platform, videoUrl, s.captionWithCredit, s.hashtags.filter { it in s.selectedHashtags },
                         remoteClipId = s.clip.remoteId,
                         sessionId = s.clip.sessionId,
                         startMs = s.clip.startMs,

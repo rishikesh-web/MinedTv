@@ -242,8 +242,11 @@ private fun AiOptionsStep(state: ShareUiState, onOptions: (EnhanceOptions) -> Un
             ToggleRow(Icons.Filled.Tag, "Trending hashtags", "Picked by AI for this clip", o.trendHashtags) {
                 onOptions(o.copy(trendHashtags = it))
             }
-            ToggleRow(Icons.Filled.MusicNote, "Trending audio", "Mix a popular sound under game audio", o.trendingAudio) {
-                onOptions(o.copy(trendingAudio = it))
+            // Music comes from the server edit, so it's only offered when that's used.
+            if (state.clip.remoteId != null && com.example.minedtv.data.api.MinedTvApi.isConfigured) {
+                ToggleRow(Icons.Filled.MusicNote, "Background music", "AI picks a licensed track that fits the clip", o.music) {
+                    onOptions(o.copy(music = it))
+                }
             }
         }
         PrimaryButton("Enhance with AI", Icons.Filled.AutoAwesome, onEnhance)
@@ -357,6 +360,20 @@ private fun ReviewStep(
                 Row {
                     Text("•", color = Gold, modifier = Modifier.padding(end = 8.dp))
                     Text(insight, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+        // CC BY licence: the music credit must travel with the video (added to the posted caption).
+        result.musicCredit?.let { credit ->
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.surface).padding(12.dp),
+                verticalAlignment = Alignment.Top
+            ) {
+                Icon(Icons.Filled.MusicNote, null, tint = Gold, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Column {
+                    Text("Music credit (added to your caption)", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text(credit, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }

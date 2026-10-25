@@ -30,7 +30,8 @@ data class EnhanceOptions(
     val autoTrim: Boolean = true,
     val targetSeconds: Int = 25,
     val trendHashtags: Boolean = true,
-    val trendingAudio: Boolean = false,
+    /** Server-picked licensed background music (mood-matched, ducked under speech). */
+    val music: Boolean = true,
     /** Server cut: false = the single best moment, true = a montage of the best moments. */
     val montage: Boolean = false
 )
@@ -83,7 +84,9 @@ data class EnhanceResult(
     val suggestedCaption: String,
     val hashtags: List<String>,
     /** Human-readable reasons for the edits, shown on the review screen. */
-    val trendInsights: List<String>
+    val trendInsights: List<String>,
+    /** CC BY credit line for the mixed-in music track; must be shown and posted with the video. */
+    val musicCredit: String? = null
 )
 
 sealed interface EnhanceJobStatus {

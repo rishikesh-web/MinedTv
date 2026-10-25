@@ -1,6 +1,8 @@
 package com.example.minedtv.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -287,8 +289,10 @@ fun Pill(text: String, selected: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-fun PillRow(options: List<String>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
-    Row(modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+fun PillRow(options: List<String>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier, scrollable: Boolean = false) {
+    // scrollable: scroll sideways instead of squeezing labels onto two lines. Only where the row
+    // isn't already inside a horizontally scrolling parent (that nesting crashes Compose).
+    Row(if (scrollable) modifier.horizontalScroll(rememberScrollState()) else modifier, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         options.forEachIndexed { i, label -> Pill(label, i == selected) { onSelect(i) } }
     }
 }
