@@ -2,6 +2,10 @@
 
 **Record it. Mine it. Post it.**
 
+[![Watch the MinedIt launch video (40 s)](docs/minedit-launch.jpg)](docs/minedit-launch.mp4)
+
+▶ **[Watch the 40-second launch video](docs/minedit-launch.mp4)**
+
 MinedIt is an Android gaming-clip app (think Medal.tv) with an AI brain. It records your gameplay in the background, lets you search *inside* your clips for what happened, cuts the best moments into captioned 9:16 videos, scores how viral a clip looks and flags 18+ content before you post.
 
 This repo is the Android app. The backend (FastAPI on Cloud Run) lives in [virajchogle/minedtv](https://github.com/virajchogle/minedtv), and the web app is at [minedtv.vercel.app](https://minedtv.vercel.app).
@@ -86,3 +90,5 @@ All requests send `X-API-Key`, the acting user as `X-User-Id` and a per-install 
 ## Credits
 
 Demo Nuggets include gameplay from Wikimedia Commons under CC BY / CC BY-SA licences; see the attribution list shipped with the demo assets. Logo: a brain, because **Mined** ≈ **Mind**.
+
+Launch video music is original (generated for the video). The footage is the app itself.
