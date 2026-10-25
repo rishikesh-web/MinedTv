@@ -55,7 +55,7 @@ import kotlinx.coroutines.launch
 private val Periods = listOf(7 to "7D", 30 to "30D", 90 to "90D")
 
 /**
- * Creator dashboard for MinedTv: published vs drafts, stats and virality predictions.
+ * Creator dashboard for MinedIt: published vs drafts, stats and virality predictions.
  * Live = the real backend (what it tracks today); Demo = generated data for presenting.
  */
 @Composable
@@ -78,6 +78,14 @@ fun DashboardScreen(onClose: () -> Unit) {
     open?.let { lastOpen = it }
     val days = Periods[period].first
 
+    // Live: real per-day totals from the backend (tracked since Oct 25, 2026).
+    var analytics by remember(live) { mutableStateOf<Analytics?>(null) }
+    LaunchedEffect(live, refresh, period) {
+        if (live) runCatching { LiveDashboardRepository.analytics(Periods[period].first) }
+            .onSuccess { analytics = it }
+            .onFailure { Logger.e("Analytics failed", it) }
+    }
+
     LaunchedEffect(live, refresh) {
         loadError = null
         runCatching { repo.clips() }
@@ -95,12 +103,14 @@ fun DashboardScreen(onClose: () -> Unit) {
 
     fun toast(msg: String) = android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
 
-    // Daily totals across published clips for the period (demo data only; the backend has no history yet).
+    // Daily totals: live from /analytics; demo sums the published clips' generated history.
     val withHistory = published.filter { it.history.isNotEmpty() }
     fun series(m: Metric, d: Int, offset: Int = 0): List<Long> =
-        if (withHistory.isEmpty()) emptyList()
+        if (live) analytics?.daily?.map { it.value(m) }.orEmpty()
+        else if (withHistory.isEmpty()) emptyList()
         else (0 until d).map { k -> withHistory.sumOf { c -> c.history[c.history.size - d - offset + k].value(m) } }
-    val dayAxis = withHistory.firstOrNull()?.history?.takeLast(days)?.map { it.day }.orEmpty()
+    val dayAxis = if (live) analytics?.daily?.map { it.day }.orEmpty()
+        else withHistory.firstOrNull()?.history?.takeLast(days)?.map { it.day }.orEmpty()
 
     Box(
         Modifier
@@ -120,7 +130,7 @@ fun DashboardScreen(onClose: () -> Unit) {
                     Column(Modifier.weight(1f)) {
                         Text("Creator dashboard", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold)
                         Text(
-                            if (live) "Live from MinedTv · ${SampleData.currentUser}" else "Demo data for presenting",
+                            if (live) "Live from MinedIt · ${SampleData.currentUser}" else "Demo data for presenting",
                             color = TextSecondary,
                             fontSize = 12.sp
                         )
@@ -139,7 +149,7 @@ fun DashboardScreen(onClose: () -> Unit) {
                             Logger.d("Dashboard mode: ${if (live) "live" else "demo"}")
                         })
                     }
-                    if (!live) {
+                    run {
                         PillRow(Periods.map { it.second }, period, {
                             Logger.d("Dashboard period: ${Periods[it].second}")
                             period = it
@@ -167,24 +177,29 @@ fun DashboardScreen(onClose: () -> Unit) {
                             CountTile("Drafts", drafts.size, Icons.Filled.Edit, Gold, Modifier.weight(1f)) { tab = 1 }
                         }
                     }
-                    // KPI tiles: tap one to chart it (demo). Live shows all-time totals for what the backend tracks.
+                    // KPI tiles: tap one to chart it. Live: period totals vs the previous period from /analytics.
                     item {
                         Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                             Metric.entries.chunked(2).forEach { row ->
                                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                                     row.forEach { m ->
-                                        val tracked = !live || m == Metric.Views || m == Metric.Likes
+                                        val tracked = !live || m != Metric.Shares
                                         val current = series(m, days)
+                                        val a = analytics
                                         StatTile(
                                             metric = m,
-                                            value = if (!tracked) null else if (live) published.sumOf { it.total(m, days) } else current.sum(),
-                                            previous = if (live) null else series(m, days, offset = days).sum(),
+                                            value = when {
+                                                !tracked -> null
+                                                live -> a?.period?.get(m) ?: published.sumOf { it.total(m, days) }
+                                                else -> current.sum()
+                                            },
+                                            previous = if (live) a?.previous?.get(m) else series(m, days, offset = days).sum(),
                                             spark = current,
                                             periodLabel = Periods[period].second,
-                                            selected = !live && m == metric,
+                                            selected = tracked && m == metric,
                                             modifier = Modifier.weight(1f)
                                         ) {
-                                            if (!live) {
+                                            if (tracked) {
                                                 Logger.d("Dashboard metric: ${m.label}")
                                                 metric = m
                                             }
@@ -197,15 +212,13 @@ fun DashboardScreen(onClose: () -> Unit) {
                     item {
                         Card16 {
                             Text("${metric.label} over time", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                            if (live || dayAxis.size < 2) {
-                                Text(
-                                    "Not tracked yet: the backend keeps current totals but no daily history, so there's no trend to draw. " +
-                                        "Switch to Demo to see how this chart will look.",
-                                    color = TextSecondary,
-                                    fontSize = 13.sp
-                                )
+                            if (live && metric == Metric.Shares) {
+                                Text("Not tracked yet: shares to other apps aren't recorded.", color = TextSecondary, fontSize = 13.sp)
+                            } else if (dayAxis.size < 2) {
+                                Text(if (live) "Loading daily totals…" else "No history yet.", color = TextSecondary, fontSize = 13.sp)
                             } else {
-                                Text("All published clips · last $days days · tap or drag for daily values", color = TextSecondary, fontSize = 12.sp)
+                                val since = analytics?.trackingSince?.let { " · tracked since " + it.format(java.time.format.DateTimeFormatter.ofPattern("MMM d", java.util.Locale.US)) } ?: ""
+                                Text("All your clips · last $days days$since · tap or drag for daily values", color = TextSecondary, fontSize = 12.sp)
                                 Spacer(Modifier.height(12.dp))
                                 TrendChart(dayAxis, series(metric, days), metric.label.lowercase())
                             }
@@ -224,7 +237,7 @@ fun DashboardScreen(onClose: () -> Unit) {
                                     fontSize = 13.sp
                                 )
                             } else {
-                                Text("On MinedTv · last $days days", color = TextSecondary, fontSize = 12.sp)
+                                Text("On MinedIt · last $days days", color = TextSecondary, fontSize = 12.sp)
                                 Spacer(Modifier.height(12.dp))
                                 SourceSplitBar(parts)
                             }
@@ -277,8 +290,8 @@ fun DashboardScreen(onClose: () -> Unit) {
                         scope.launch {
                             runCatching { repo.publish(clip) }
                                 .onSuccess {
-                                    Logger.i("Published to MinedTv: ${clip.remoteId ?: clip.id}")
-                                    toast("Published to MinedTv")
+                                    Logger.i("Published to MinedIt: ${clip.remoteId ?: clip.id}")
+                                    toast("Published to MinedIt")
                                     open = null
                                     tab = 0
                                     refresh++
@@ -432,7 +445,7 @@ private fun PublishedRow(c: DashboardClip, days: Int, live: Boolean, onClick: ()
             PublishedDate(c.publication)
             Text(
                 "${formatCount(c.total(Metric.Views, days).toInt())} views · ${formatCount(c.total(Metric.Likes, days).toInt())} likes" +
-                    if (live) "" else " · ${formatCount(c.total(Metric.Comments, days).toInt())} comments",
+                    " · ${formatCount(c.total(Metric.Comments, days).toInt())} comments",
                 fontSize = 11.sp,
                 color = TextSecondary,
                 maxLines = 1
@@ -462,7 +475,6 @@ private fun DraftRow(c: DashboardClip, repo: DashboardRepository, onClick: () ->
             Text(
                 when {
                     c.isLocalRecording -> "Recorded on this phone · not posted"
-                    c.isReadyToPost -> "Ready to post · ${c.clip.game} · ${c.clip.duration}"
                     else -> "Draft · ${c.clip.game} · ${c.clip.duration}"
                 },
                 fontSize = 11.sp,
@@ -534,7 +546,7 @@ private fun ClipInsights(
     onUnpublish: (Clip) -> Unit
 ) {
     val scope = rememberCoroutineScope()
-    // MinedTv-only for now: the engine's "general" audience stands in for the MinedTv feed.
+    // MinedIt-only for now: the engine's "general" audience stands in for the MinedIt feed.
     val platform = ViralityPlatform.General
     var report by remember(c.clip.id, platform) { mutableStateOf(repo.cachedReport(c.clip, platform)) }
     var loading by remember(c.clip.id, platform) { mutableStateOf(false) }
@@ -542,8 +554,6 @@ private fun ClipInsights(
     var error by remember(c.clip.id) { mutableStateOf<String?>(null) }
     var metric by rememberSaveable(c.clip.id) { mutableStateOf(Metric.Views) }
     val sincePublish = c.history.dropWhile { it.views == 0L }.takeLast(30)
-    // Live virality checks run on drafts only.
-    val canPredict = !c.isPublished || !repo.isLive
 
     fun runPrediction() {
         Logger.i("Predict virality: clip=${c.clip.remoteId ?: c.clip.id} platform=${platform.apiName} live=${repo.isLive}")
@@ -565,7 +575,7 @@ private fun ClipInsights(
 
     // A live check keeps running on the server if you leave: pick it back up when the clip is reopened.
     LaunchedEffect(c.clip.id, repo) {
-        if (report == null && canPredict) {
+        if (report == null) {
             when (val s = runCatching { repo.viralityState(c.clip, platform) }.getOrDefault(ViralityState.None)) {
                 is ViralityState.Ready -> report = s.report
                 ViralityState.Processing -> runPrediction()
@@ -588,7 +598,6 @@ private fun ClipInsights(
                 Text(
                     when {
                         c.isPublished -> "Published · ${c.clip.game}"
-                        c.isReadyToPost -> "Ready to post · ${c.clip.game}"
                         else -> "Draft · only you can see this · ${c.clip.game}"
                     },
                     color = TextSecondary,
@@ -601,7 +610,7 @@ private fun ClipInsights(
             if (c.isPublished) {
                 item { Box(Modifier.padding(horizontal = 16.dp)) { PublishedDate(c.publication) } }
                 item {
-                    val shown = if (repo.isLive) listOf(Metric.Views, Metric.Likes) else Metric.entries
+                    val shown = if (repo.isLive) listOf(Metric.Views, Metric.Likes, Metric.Comments) else Metric.entries
                     Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         shown.forEach { m ->
                             Column(
@@ -638,7 +647,8 @@ private fun ClipInsights(
                         Text("Virality prediction", fontSize = 18.sp, fontWeight = FontWeight.Bold)
                     }
                     Text(
-                        if (c.isPublished) "How the MinedTv audience reacts to it" else "A synthetic MinedTv audience watches it before you post",
+                        if (repo.isLive) "Scored moment by moment from the video itself"
+                        else if (c.isPublished) "How the MinedIt audience reacts to it" else "A synthetic MinedIt audience watches it before you post",
                         color = TextSecondary,
                         fontSize = 12.sp
                     )
@@ -647,29 +657,12 @@ private fun ClipInsights(
             item {
                 val r = report
                 when {
-                    !canPredict -> Card16 {
-                        Text("Checks run on drafts", fontWeight = FontWeight.SemiBold)
-                        Text(
-                            "Move this clip back to drafts to predict its virality. It's hidden from the feed and search until you publish it again.",
-                            color = TextSecondary,
-                            fontSize = 13.sp
-                        )
-                        Spacer(Modifier.height(12.dp))
-                        OutlinedButton(
-                            onClick = {
-                                Logger.i("Unpublish from dashboard: clip=${c.clip.remoteId}")
-                                onUnpublish(c.clip)
-                            },
-                            modifier = Modifier.fillMaxWidth().height(48.dp),
-                            shape = RoundedCornerShape(12.dp)
-                        ) { Text("Move to drafts", color = Color.White) }
-                    }
-                    loading -> Card16 { PredictingState(if (repo.isLive) progress.ifEmpty { "Starting on the server…" } else "Simulating MinedTv viewers", repo.isLive) }
+                    loading -> Card16 { PredictingState(if (repo.isLive) progress.ifEmpty { "Starting…" } else "Simulating MinedIt viewers", repo.isLive) }
                     r == null -> Card16 {
-                        Text("No prediction yet", fontWeight = FontWeight.SemiBold)
+                        Text(if (repo.isLive) "Not scored yet" else "No prediction yet", fontWeight = FontWeight.SemiBold)
                         Text(
-                            "9 AI personas (core fans, adjacent viewers, outsiders) react to the clip and we estimate how far it spreads." +
-                                if (repo.isLive) " Runs on the server and takes a few minutes. You can leave and come back." else "",
+                            if (repo.isLive) "This upload is from before automatic scoring. Scoring every frame takes a few seconds."
+                            else "9 AI personas (core fans, adjacent viewers, outsiders) react to the clip and we estimate how far it spreads.",
                             color = TextSecondary,
                             fontSize = 13.sp
                         )
@@ -685,7 +678,7 @@ private fun ClipInsights(
                         ) {
                             Icon(Icons.Filled.AutoAwesome, null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(8.dp))
-                            Text(if (error != null) "Try again" else "Predict virality", fontWeight = FontWeight.Bold)
+                            Text(if (error != null) "Try again" else if (repo.isLive) "Score virality" else "Predict virality", fontWeight = FontWeight.Bold)
                         }
                     }
                     // Re-read the repository so extra panel scores show up as they arrive.
@@ -695,7 +688,7 @@ private fun ClipInsights(
             if (!c.isPublished) item {
                 Button(
                     onClick = {
-                        Logger.i("Publish to MinedTv from dashboard: clip=${c.clip.remoteId ?: c.clip.id}")
+                        Logger.i("Publish to MinedIt from dashboard: clip=${c.clip.remoteId ?: c.clip.id}")
                         onPublish(c.clip)
                     },
                     modifier = Modifier.padding(horizontal = 16.dp).fillMaxWidth().height(52.dp),
@@ -703,7 +696,7 @@ private fun ClipInsights(
                 ) {
                     Icon(Icons.Filled.Publish, null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
-                    Text("Publish to MinedTv", fontWeight = FontWeight.Bold)
+                    Text("Publish to MinedIt", fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -727,9 +720,9 @@ private fun PredictingState(detail: String, live: Boolean) {
         }
         Spacer(Modifier.width(14.dp))
         Column {
-            Text("Running 9 audience personas…", fontWeight = FontWeight.SemiBold)
+            Text(if (live) "Scoring every frame…" else "Running 9 audience personas…", fontWeight = FontWeight.SemiBold)
             Text(detail, color = TextSecondary, fontSize = 12.sp)
-            if (live) Text("Takes a few minutes. You can leave this screen.", color = TextSecondary, fontSize = 11.sp)
+            if (live) Text("Takes a few seconds.", color = TextSecondary, fontSize = 11.sp)
         }
     }
 }
@@ -762,8 +755,63 @@ private fun ScoreRange(r: ViralityReport) {
     }
 }
 
+private val SignalLabels = mapOf(
+    "visual" to "Looks like a highlight",
+    "scene" to "Sustained scene",
+    "novelty" to "Visual change",
+    "visibility" to "Readable frame",
+    "event" to "Detected events",
+    "speech" to "Reaction speech"
+)
+
+/** Live backend: the frame scorer's score, its peak, the moment-by-moment curve and the signals behind it. */
+@Composable
+private fun FrameViralityView(r: ViralityReport) {
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Card16 {
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text("${r.score.toInt()}", fontSize = 56.sp, fontWeight = FontWeight.ExtraBold, lineHeight = 56.sp)
+                Text(" /100", fontSize = 18.sp, color = TextSecondary, modifier = Modifier.padding(bottom = 8.dp))
+                Spacer(Modifier.weight(1f))
+                Box(Modifier.padding(bottom = 10.dp)) { VerdictChip(r.verdict) }
+            }
+            Text("Virality score from every frame of the clip", color = TextSecondary, fontSize = 12.sp)
+            Spacer(Modifier.height(10.dp))
+            ScoreRange(r)
+            r.peakOffsetMs?.let {
+                Spacer(Modifier.height(10.dp))
+                Text("Strongest moment at %d:%02d".format(it / 60_000, it / 1000 % 60), fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
+        if (r.curve.size >= 2) Card16 {
+            Text("Moment by moment", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            Text("Score of each sampled frame. Tap or drag to inspect.", color = TextSecondary, fontSize = 12.sp)
+            Spacer(Modifier.height(12.dp))
+            MomentCurve(r.curve, r.peakOffsetMs)
+        }
+        if (r.components.isNotEmpty()) Card16 {
+            Text("What drives the score", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            Text("Average over the clip's strongest frames, 0–100", color = TextSecondary, fontSize = 12.sp)
+            Spacer(Modifier.height(8.dp))
+            r.components.sortedByDescending { it.second }.forEach { (key, v) ->
+                Row(Modifier.padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(SignalLabels[key] ?: key, fontSize = 13.sp, modifier = Modifier.width(150.dp))
+                    Meter(v / 100f, Modifier.weight(1f))
+                    Text("${v.toInt()}", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.width(40.dp).padding(start = 10.dp))
+                }
+            }
+        }
+        Row(Modifier.padding(horizontal = 16.dp)) {
+            Icon(Icons.Filled.Info, null, tint = DashboardColors.AxisText, modifier = Modifier.size(14.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(r.disclaimer, color = DashboardColors.AxisText, fontSize = 11.sp)
+        }
+    }
+}
+
 @Composable
 private fun ViralityReportView(r: ViralityReport) {
+    if (r.isFrameScore) return FrameViralityView(r)
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
         // Hero score + verdict
         Card16 {

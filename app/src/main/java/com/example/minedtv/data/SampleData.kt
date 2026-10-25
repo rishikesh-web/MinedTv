@@ -23,12 +23,27 @@ data class Clip(
     val likedByMe: Boolean = false,
     /** Recorded on this phone; null for sample and backend clips. */
     val localPath: String? = null,
-    /** Backend publish state: "draft", "ready" (queued for YouTube) or "published"; null for sample data. */
+    /** Backend publish state: "draft" (private, My videos) or "published"; null for sample data. */
     val publishState: String? = null,
     val publishedAt: String? = null,
     /** Backend id of the clip's creator (for follow). */
-    val userId: String? = null
-)
+    val userId: String? = null,
+    /** Moderation flagged it mild or severe: show an 18+ badge. */
+    val ageRestricted: Boolean = false,
+    /** none / mild / severe (null for sample data). */
+    val moderationSeverity: String? = null,
+    val moderationReason: String? = null,
+    val moderationViolationCount: Int = 0,
+    /** Display size (rotation applied); 0 when unknown (sample data). */
+    val width: Int = 0,
+    val height: Int = 0,
+    /** "short" (vertical, ≤ 60 s: a reel) or "long"; null for sample data. */
+    val format: String? = null,
+    /** For reels: the clip it was made from. */
+    val reelOf: String? = null
+) {
+    val isReel: Boolean get() = format == "short"
+}
 
 data class Game(val name: String, val clips: Int, val colors: List<Color>)
 

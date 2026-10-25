@@ -34,7 +34,7 @@ class IntentPlatformPublisher(private val context: Context) : PlatformPublisher 
 
     override fun publish(request: PublishRequest): Flow<PublishStatus> = flow {
         val platform = request.platform
-        val pkg = packages.getValue(platform).firstOrNull { isInstalled(it) }
+        val pkg = packages[platform].orEmpty().firstOrNull { isInstalled(it) }
         if (pkg == null) {
             emit(PublishStatus.Failed("${platform.displayName} isn't installed on this phone"))
             return@flow
@@ -87,7 +87,7 @@ class IntentPlatformPublisher(private val context: Context) : PlatformPublisher 
         val opened = withContext(Dispatchers.Main) {
             if (caption.isNotEmpty()) {
                 val clipboard = context.getSystemService(ClipboardManager::class.java)
-                clipboard.setPrimaryClip(ClipData.newPlainText("MinedTv caption", caption))
+                clipboard.setPrimaryClip(ClipData.newPlainText("MinedIt caption", caption))
             }
             try {
                 context.startActivity(intent)
@@ -129,6 +129,7 @@ class IntentPlatformPublisher(private val context: Context) : PlatformPublisher 
                 send().setPackage(pkg)
             )
             SharePlatform.TikTok -> listOf(send().setPackage(pkg))
+            SharePlatform.MinedIt -> emptyList() // posted through the MinedIt API, never a share intent
         }
     }
 

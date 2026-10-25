@@ -36,7 +36,7 @@ import kotlinx.coroutines.launch
 
 /**
  * Animated launch screen: the gold tile pops in, the brain draws itself stroke by stroke,
- * then "MinedTv" and the tagline slide in. Calls [onFinished] when done (~2.6s).
+ * then "MinedIt" and the tagline slide in. Calls [onFinished] when done (~2.6s).
  */
 @Composable
 fun SplashScreen(onFinished: () -> Unit) {
@@ -142,7 +142,7 @@ fun SplashScreen(onFinished: () -> Unit) {
                     }
                 )
                 Text(
-                    "Tv",
+                    "It",
                     color = Gold,
                     fontSize = 44.sp,
                     fontWeight = FontWeight.ExtraBold,

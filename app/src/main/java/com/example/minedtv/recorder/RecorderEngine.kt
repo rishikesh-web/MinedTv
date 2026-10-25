@@ -64,7 +64,7 @@ class RecorderEngine(
         val (w, h, dpi) = captureSize()
         val encoder = newVideoEncoder(w, h)
         display = projection.createVirtualDisplay(
-            "MinedTv-recorder", w, h, dpi, DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, encoder.surface, null, null
+            "MinedIt-recorder", w, h, dpi, DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, encoder.surface, null, null
         )
         audio?.start()
         displayManager.registerDisplayListener(displayListener, mainHandler)
@@ -120,7 +120,7 @@ class RecorderEngine(
                 try {
                     check(segments.isNotEmpty()) { "Nothing recorded yet, give it a few seconds" }
                     val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-                    val out = File(LocalClips.dir(context), "MinedTv_$stamp.mp4")
+                    val out = File(LocalClips.dir(context), "MinedIt_$stamp.mp4")
                     val durationUs = ClipJoiner.join(segments.map { it.file }, out)
                     val game = Recorder.appLabel(context, Recorder.lastApp.value) ?: "Gameplay"
                     LocalClips.saveMeta(out, game, durationUs / 1_000)
@@ -145,7 +145,7 @@ class RecorderEngine(
         val values = ContentValues().apply {
             put(MediaStore.Video.Media.DISPLAY_NAME, file.name)
             put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-            put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/MinedTv")
+            put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/MinedIt")
             put(MediaStore.Video.Media.IS_PENDING, 1)
         }
         val uri = resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values) ?: return

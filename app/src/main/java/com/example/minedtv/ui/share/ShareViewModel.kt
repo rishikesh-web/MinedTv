@@ -31,7 +31,9 @@ data class ShareUiState(
     val postUrl: String? = null,
     val openedInApp: Boolean = false,
     val captionCopied: Boolean = false,
-    val error: String? = null
+    val error: String? = null,
+    /** "Post as a MinedIt Reel" progress: null = not started, then a status line, "Posted" or "Failed: …". */
+    val reel: String? = null
 )
 
 class ShareViewModel(
@@ -47,7 +49,16 @@ class ShareViewModel(
 
     fun selectPlatform(platform: SharePlatform) {
         Logger.d("Share platform: ${platform.displayName}")
-        update { copy(platform = platform, step = ShareStep.Mode) }
+        if (platform == SharePlatform.MinedIt) {
+            // A MinedIt reel is always the 9:16 AI edit, so skip "share directly vs enhance".
+            update {
+                copy(
+                    platform = platform, mode = ShareMode.AiEnhanced, step = ShareStep.AiOptions,
+                    options = options.copy(targetSeconds = minOf(clip.durationSeconds, platform.idealSeconds)),
+                    caption = clip.title, error = null, reel = null
+                )
+            }
+        } else update { copy(platform = platform, step = ShareStep.Mode) }
     }
 
     fun selectMode(mode: ShareMode) {
@@ -178,13 +189,51 @@ class ShareViewModel(
         }
     }
 
+    /**
+     * Posts the AI edit (already 9:16, captioned, with the end card) to MinedIt as a reel of this clip:
+     * upload with as_reel + reel_of, wait for processing, then publish it to the Reels feed.
+     */
+    fun postReel() {
+        val s = _state.value
+        val path = s.result?.videoUrl?.takeIf { it.startsWith("/") } ?: return
+        val source = s.clip.remoteId ?: return
+        update { copy(reel = "Uploading nugget…") }
+        viewModelScope.launch {
+            try {
+                val sid = com.example.minedtv.data.api.MinedTvApi.uploadRecording(
+                    java.io.File(path), s.clip.game, s.caption.ifBlank { s.clip.title }.take(120),
+                    asReel = true, reelOf = source
+                ) { p -> update { copy(reel = "Uploading nugget… ${(p * 100).toInt()}%") } }
+                Logger.i("Reel uploaded: session $sid (reel of $source)")
+                var status = ""
+                val started = System.currentTimeMillis()
+                while (status != "ready") {
+                    status = com.example.minedtv.data.api.MinedTvApi.sessionStatus(sid)
+                    if (status == "failed" || status == "blocked") error(if (status == "blocked") "blocked by moderation" else "processing failed")
+                    if (System.currentTimeMillis() - started > 10 * 60_000) error("processing is taking too long")
+                    update { copy(reel = "Processing nugget… ($status)") }
+                    if (status != "ready") kotlinx.coroutines.delay(4_000)
+                }
+                val clip = com.example.minedtv.data.api.MinedTvApi.sessionClips(sid).firstOrNull() ?: error("no clip was made")
+                com.example.minedtv.data.api.MinedTvApi.publish(clip.remoteId!!)
+                Logger.i("Reel published: ${clip.remoteId} (${clip.width}x${clip.height}, ${clip.format})")
+                update { copy(reel = "Posted") }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Logger.e("Post reel failed", e)
+                update { copy(reel = "Failed: ${e.message ?: "try again"}") }
+            }
+        }
+    }
+
     /** Goes back one step. Returns false when the flow should be closed instead. */
     fun back(): Boolean {
         val s = _state.value
         val previous = when (s.step) {
             ShareStep.Platform, ShareStep.Done -> null
             ShareStep.Mode -> ShareStep.Platform
-            ShareStep.Direct, ShareStep.AiOptions -> ShareStep.Mode
+            ShareStep.Direct, ShareStep.AiOptions -> if (s.platform == SharePlatform.MinedIt) ShareStep.Platform else ShareStep.Mode
             ShareStep.Processing, ShareStep.Review -> ShareStep.AiOptions
             ShareStep.Publishing -> if (s.mode == ShareMode.AiEnhanced) ShareStep.Review else ShareStep.Direct
         } ?: return false

@@ -15,7 +15,7 @@ import com.example.minedtv.ui.components.BRAIN_PATH
 import java.io.File
 
 /**
- * The "made with MinedTv" end card appended to every AI edit (like TikTok's outro on downloaded
+ * The "made with MinedIt" end card appended to every AI edit (like TikTok's outro on downloaded
  * videos): app logo, wordmark and the creator's handle on the app's dark background.
  */
 object EndCard {
@@ -57,13 +57,13 @@ object EndCard {
             strokeJoin = Paint.Join.ROUND
         })
 
-        // Wordmark: "Mined" white + "Tv" gold.
+        // Wordmark: "Mined" white + "It" gold.
         val word = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             textSize = unit * 13
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         }
         val mined = "Mined"
-        val tv = "Tv"
+        val tv = "It"
         val total = word.measureText(mined + tv)
         val baseline = tileRect.bottom + unit * 18
         word.color = 0xFFFFFFFF.toInt()
@@ -84,7 +84,7 @@ object EndCard {
             color = 0x8CFFFFFF.toInt()
             typeface = Typeface.DEFAULT
         }
-        canvas.drawText("Clipped & edited with AI on MinedTv", cx, baseline + unit * 17, small)
+        canvas.drawText("Clipped & edited with AI on MinedIt", cx, baseline + unit * 17, small)
 
         val out = File(context.cacheDir, "share").apply { mkdirs() }.resolve("endcard_${width}x$height.png")
         out.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }

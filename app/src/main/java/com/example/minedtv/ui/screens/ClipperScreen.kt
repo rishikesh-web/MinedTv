@@ -335,10 +335,10 @@ fun ClipperScreen(onClipClick: (Clip) -> Unit, onSearchClips: () -> Unit) {
             title = { Text("Turn on the floating Clip button") },
             text = {
                 Text(
-                    "MinedTv uses Android's accessibility service only to show a Clip button over your games while " +
+                    "MinedIt uses Android's accessibility service only to show a Clip button over your games while " +
                         "recording, and to see which app is open so clips get the game's name. It doesn't read what's " +
                         "on screen, tap anything for you, or send this data anywhere.\n\nNext: Accessibility → Installed " +
-                        "apps → MinedTv Clip button → turn it on."
+                        "apps → MinedIt Clip button → turn it on."
                 )
             },
             confirmButton = {

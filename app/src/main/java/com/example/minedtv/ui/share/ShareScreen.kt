@@ -91,7 +91,7 @@ fun ShareScreen(clip: Clip, sessionKey: Int, onClose: () -> Unit) {
                 ShareStep.Direct -> DirectStep(state, vm::setCaption, vm::publish) { vm.selectMode(ShareMode.AiEnhanced) }
                 ShareStep.AiOptions -> AiOptionsStep(state, vm::updateOptions, vm::startEnhance)
                 ShareStep.Processing -> ProcessingStep(state, onRetry = vm::startEnhance, onCancel = { vm.back() })
-                ShareStep.Review -> ReviewStep(state, vm::setCaption, vm::toggleHashtag, vm::startEnhance, vm::publish)
+                ShareStep.Review -> ReviewStep(state, vm::setCaption, vm::toggleHashtag, vm::startEnhance, vm::publish, vm::postReel)
                 ShareStep.Publishing -> PublishingStep(state, vm::publish)
                 ShareStep.Done -> DoneStep(state, onClose, vm::publish)
             }
@@ -124,7 +124,8 @@ private fun PlatformStep(clip: Clip, onSelect: (SharePlatform) -> Unit) {
                 Column(Modifier.weight(1f)) {
                     Text(platform.displayName, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                     Text(
-                        "${platform.aspectRatio} vertical · up to ${formatDuration(platform.maxSeconds)}",
+                        if (platform == SharePlatform.MinedIt) "AI edit to 9:16 · shows in the Nuggets tab"
+                        else "${platform.aspectRatio} vertical · up to ${formatDuration(platform.maxSeconds)}",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 13.sp
                     )
@@ -200,16 +201,28 @@ private fun DirectStep(
 private fun AiOptionsStep(state: ShareUiState, onOptions: (EnhanceOptions) -> Unit, onEnhance: () -> Unit) {
     val platform = state.platform ?: return
     val o = state.options
-    val clipSeconds = state.clip.durationSeconds
-    val maxTarget = maxOf(11, minOf(clipSeconds, platform.maxSeconds))
 
     StepColumn {
         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
             PhonePreview(state.clip, vertical = o.reframe, caption = if (o.captions) "WAIT FOR IT…" else null)
         }
+        // Montage needs the server edit, which is always 9:16 (stored clips only).
+        val canMontage = state.clip.remoteId != null && com.example.minedtv.data.api.MinedTvApi.isConfigured
+        if (canMontage) SettingsCard {
+            Text("What to cut", fontWeight = FontWeight.Bold)
+            PillRow(listOf("Best moment", "Montage"), if (o.montage) 1 else 0, {
+                onOptions(o.copy(montage = it == 1, reframe = if (it == 1) true else o.reframe))
+            })
+            Text(
+                if (o.montage) "The best moments cut together, with captions."
+                else "Just the single strongest moment, with captions.",
+                fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
         SettingsCard {
             ToggleRow(Icons.Filled.Crop, "Auto-reframe to ${platform.aspectRatio}", "Keeps the action centered", o.reframe) {
-                onOptions(o.copy(reframe = it))
+                onOptions(o.copy(reframe = it, montage = if (!it) false else o.montage))
             }
             ToggleRow(Icons.Filled.ClosedCaption, "Auto captions", "Hook line + the clip's dialogue", o.captions) {
                 onOptions(o.copy(captions = it))
@@ -222,23 +235,9 @@ private fun AiOptionsStep(state: ShareUiState, onOptions: (EnhanceOptions) -> Un
                     Modifier.padding(start = 40.dp)
                 )
             }
-            ToggleRow(Icons.Filled.ContentCut, "Smart trim", "Cut to the best part", o.autoTrim) {
+            // Length is automatic: the platform's sweet spot (set when the mode is picked).
+            if (!o.montage) ToggleRow(Icons.Filled.ContentCut, "Smart trim", "Cut to the best ~${o.targetSeconds}s", o.autoTrim) {
                 onOptions(o.copy(autoTrim = it))
-            }
-            if (o.autoTrim) {
-                Column(Modifier.padding(start = 40.dp)) {
-                    Text(
-                        "Target ${formatDuration(o.targetSeconds)} of ${state.clip.duration} · sweet spot on ${platform.displayName}: ~${platform.idealSeconds}s",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Slider(
-                        value = o.targetSeconds.toFloat(),
-                        onValueChange = { onOptions(o.copy(targetSeconds = it.toInt())) },
-                        valueRange = 10f..maxTarget.toFloat(),
-                        colors = SliderDefaults.colors(thumbColor = Gold, activeTrackColor = Gold)
-                    )
-                }
             }
             ToggleRow(Icons.Filled.Tag, "Trending hashtags", "Picked by AI for this clip", o.trendHashtags) {
                 onOptions(o.copy(trendHashtags = it))
@@ -320,7 +319,8 @@ private fun ReviewStep(
     onCaption: (String) -> Unit,
     onToggleHashtag: (String) -> Unit,
     onRegenerate: () -> Unit,
-    onPost: () -> Unit
+    onPost: () -> Unit,
+    onPostReel: () -> Unit
 ) {
     val result = state.result ?: return
     val platform = state.platform ?: return
@@ -382,7 +382,22 @@ private fun ReviewStep(
                 Spacer(Modifier.width(6.dp))
                 Text("Regenerate", color = Color.White, maxLines = 1)
             }
-            Button(
+            if (platform == SharePlatform.MinedIt) {
+                // Uploaded as a reel of this clip, then published to the Reels feed.
+                val r = state.reel
+                Button(
+                    onClick = onPostReel,
+                    enabled = r == null || r.startsWith("Failed"),
+                    modifier = Modifier.weight(1.3f).height(52.dp),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    if (r == "Posted") {
+                        Icon(Icons.Filled.CheckCircle, null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                    }
+                    Text(r ?: "Post to MinedIt", fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            } else Button(
                 onClick = onPost,
                 modifier = Modifier.weight(1.3f).height(52.dp),
                 shape = RoundedCornerShape(14.dp)
@@ -526,9 +541,13 @@ fun PlatformIcon(platform: SharePlatform, size: Dp, modifier: Modifier = Modifie
         contentAlignment = Alignment.Center
     ) {
         Icon(
-            if (platform == SharePlatform.TikTok) Icons.Filled.MusicNote else Icons.Filled.CameraAlt,
+            when (platform) {
+                SharePlatform.TikTok -> Icons.Filled.MusicNote
+                SharePlatform.InstagramReels -> Icons.Filled.CameraAlt
+                SharePlatform.MinedIt -> BrainIcon
+            },
             platform.displayName,
-            tint = Color.White,
+            tint = if (platform == SharePlatform.MinedIt) Color.Black else Color.White,
             modifier = Modifier.size(size * 0.55f)
         )
     }

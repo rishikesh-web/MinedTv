@@ -3,13 +3,22 @@ package com.example.minedtv.data.dashboard
 import com.example.minedtv.data.Clip
 import java.time.LocalDate
 
-/** Where a clip's MinedTv views come from. Colours are fixed per source (see DashboardColors). */
+/** Where a clip's MinedIt views come from. Colours are fixed per source (see DashboardColors). */
 enum class TrafficSource(val label: String) { Feed("Home feed"), Search("Search"), Profile("Profile"), SharedLink("Shared links") }
 
-/** A clip is "published" once it's posted to the MinedTv feed. */
+/** A clip is "published" once it's posted to the MinedIt feed. */
 data class Publication(val publishedOn: LocalDate)
 
 data class DailyStat(val day: LocalDate, val views: Long, val likes: Long, val comments: Long, val shares: Long)
+
+/** Live `GET /users/{me}/analytics`: per-day totals (zero-filled, oldest first) and period comparisons. */
+data class Analytics(
+    val daily: List<DailyStat>,
+    val period: Map<Metric, Long>,
+    val previous: Map<Metric, Long>,
+    /** First day with daily views; earlier views only count in all-time totals. */
+    val trackingSince: LocalDate?
+)
 
 enum class Metric(val label: String) { Views("Views"), Likes("Likes"), Comments("Comments"), Shares("Shares") }
 
@@ -24,16 +33,14 @@ data class DashboardClip(
     val clip: Clip,
     /** Null while it's a draft. */
     val publication: Publication?,
-    /** Daily MinedTv stats, oldest first (empty for drafts). */
+    /** Daily MinedIt stats, oldest first (empty for drafts). */
     val history: List<DailyStat>,
     /** Share of this clip's views per traffic source (sums to 1). */
     val trafficShare: Map<TrafficSource, Float> = emptyMap(),
     /** Draft that was recorded on this phone. */
     val isLocalRecording: Boolean = false,
     /** All-time totals when there's no daily history (live backend data). */
-    val totals: Map<Metric, Long> = emptyMap(),
-    /** Backend "ready" bucket: queued to post to YouTube. */
-    val isReadyToPost: Boolean = false
+    val totals: Map<Metric, Long> = emptyMap()
 ) {
     val isPublished get() = publication != null
     fun total(m: Metric, days: Int) = if (history.isEmpty()) totals[m] ?: 0L else history.takeLast(days).sumOf { it.value(m) }
@@ -49,7 +56,7 @@ sealed interface ViralityState {
 // ---- Virality engine (mirrors the backend's AudienceSimulation) ----
 
 enum class ViralityPlatform(val label: String, val apiName: String) {
-    General("MinedTv", "general"), TikTok("TikTok", "tiktok"), Instagram("Reels", "instagram"), YouTube("YouTube", "youtube")
+    General("MinedIt", "general"), TikTok("TikTok", "tiktok"), Instagram("Reels", "instagram"), YouTube("YouTube", "youtube")
 }
 
 enum class Verdict(val label: String) { Weak("Weak"), Mixed("Mixed"), Promising("Promising"), Strong("Strong") }
@@ -101,8 +108,18 @@ data class ViralityReport(
      */
     val samples: List<Float> = listOf(score),
     /** More panels are still running for the range. */
-    val rangePending: Boolean = false
-)
+    val rangePending: Boolean = false,
+    // ---- Frame scorer (live backend): no personas; a per-moment curve instead ----
+    /** The clip's strongest moment, from its start. */
+    val peakOffsetMs: Long? = null,
+    /** Signal → 0-100 (visual, scene, novelty, visibility, event, speech). */
+    val components: List<Pair<String, Float>> = emptyList(),
+    /** (offset ms, 0-100) per sampled frame. */
+    val curve: List<Pair<Long, Float>> = emptyList()
+) {
+    /** Comes from the backend's frame scorer rather than a persona panel. */
+    val isFrameScore: Boolean get() = curve.isNotEmpty() || components.isNotEmpty()
+}
 
 /** The headline: the middle score of all panels (just [ViralityReport.score] with one panel). */
 val ViralityReport.median: Float get() = samples.sorted().let { it[(it.size - 1) / 2] }

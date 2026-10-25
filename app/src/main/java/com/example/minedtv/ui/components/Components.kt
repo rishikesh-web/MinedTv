@@ -34,6 +34,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import coil3.compose.AsyncImage
 import androidx.compose.ui.layout.ContentScale
+import com.example.minedtv.data.api.MinedTvApi
 
 @Composable
 fun MinedTvLogo(modifier: Modifier = Modifier) {
@@ -51,7 +52,7 @@ fun MinedTvLogo(modifier: Modifier = Modifier) {
         Text(
             buildAnnotatedString {
                 append("Mined")
-                withStyle(SpanStyle(color = Gold)) { append("Tv") }
+                withStyle(SpanStyle(color = Gold)) { append("It") }
             },
             fontSize = 22.sp,
             fontWeight = FontWeight.ExtraBold
@@ -127,6 +128,19 @@ fun ClipThumbnail(item: Clip, modifier: Modifier = Modifier, compact: Boolean = 
             Icon(Icons.Filled.PlayArrow, null, tint = Color.White)
         }
         if (!compact) GameChip(item.game, Modifier.align(Alignment.TopStart).padding(8.dp))
+        if (item.ageRestricted) {
+            Text(
+                "18+",
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(if (compact) 4.dp else 8.dp)
+                    .background(Color(0xFFD03B3B), RoundedCornerShape(4.dp))
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                color = Color.White,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.ExtraBold
+            )
+        }
         Text(
             item.duration,
             modifier = Modifier
@@ -216,7 +230,7 @@ fun ClipCard(item: Clip, onClick: () -> Unit) {
                 Logger.d("Feed clip ${if (liked) "liked" else "unliked"}: id=${item.id}")
             }
             StatAction(Icons.Outlined.ChatBubbleOutline, formatCount(item.comments), onClick = onClick)
-            StatAction(Icons.Outlined.Share, "Share")
+            if (MinedTvApi.owns(item)) StatAction(Icons.Outlined.Share, "Share", onClick = onClick)
             Spacer(Modifier.weight(1f))
             Icon(
                 Icons.Outlined.Visibility, null,

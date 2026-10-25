@@ -63,7 +63,7 @@ fun HomeScreen(onClipClick: (Clip) -> Unit, onSearch: () -> Unit, onNotification
     var remote by remember { mutableStateOf<List<Clip>>(emptyList()) }
     LaunchedEffect(seed) {
         if (!MinedTvApi.isConfigured) return@LaunchedEffect
-        runCatching { MinedTvApi.feed(limit = 50).first }
+        runCatching { MinedTvApi.feed(limit = 50, format = "long").first }
             .onSuccess {
                 remote = it
                 Logger.d("Feed: ${it.size} clips from backend")
@@ -75,7 +75,7 @@ fun HomeScreen(onClipClick: (Clip) -> Unit, onSearch: () -> Unit, onNotification
     var following by remember { mutableStateOf<List<Clip>?>(null) }
     LaunchedEffect(feed, seed) {
         if (!live || feed != 1) return@LaunchedEffect
-        runCatching { MinedTvApi.followingFeed() }
+        runCatching { MinedTvApi.followingFeed(format = "long") }
             .onSuccess {
                 following = it
                 Logger.d("Following feed: ${it.size} clips")

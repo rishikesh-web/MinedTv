@@ -2,6 +2,7 @@ package com.example.minedtv.data.share
 
 import android.content.Context
 import android.media.MediaMetadataRetriever
+import com.example.minedtv.data.api.ApiException
 import com.example.minedtv.data.api.MinedTvApi
 import com.example.minedtv.util.Logger
 import kotlinx.coroutines.CancellationException
@@ -52,6 +53,18 @@ class RemoteEnhanceRepository(
 
             try {
                 send(EnhanceJobStatus.Uploading(0.02f))
+                // A clip on MinedIt (a search moment is saved as one first).
+                val remoteClipId = if (request.localPath != null) null else request.remoteClipId
+                    ?: MinedTvApi.createClip(request.sessionId!!, request.startMs, request.endMs, request.title).remoteId!!
+                // Server highlights do the whole edit (9:16, trim, captions). Opting out of reframe or
+                // trim keeps the on-device editor, which can do either one alone.
+                if (remoteClipId != null && request.options.reframe && (request.options.autoTrim || request.options.montage)) {
+                    val result = serverHighlights(remoteClipId, request, jobId) { trySend(it) }
+                    if (result != null) {
+                        send(EnhanceJobStatus.Completed(result))
+                        return@channelFlow
+                    }
+                }
                 val source: File
                 val pack: JSONObject
                 if (request.localPath != null) {
@@ -66,9 +79,8 @@ class RemoteEnhanceRepository(
                         }
                     }
                 } else {
-                    val clipId = request.remoteClipId
-                        ?: MinedTvApi.createClip(request.sessionId!!, request.startMs, request.endMs, request.title).remoteId!!
-                    source = File(context.cacheDir, "share").apply { mkdirs() }.resolve("source_$clipId.mp4")
+                    val clipId = remoteClipId!!
+                    source =File(context.cacheDir, "share").apply { mkdirs() }.resolve("source_$clipId.mp4")
                     pack = coroutineScope {
                         // Gemini analysis and the MP4 export run on the server at the same time.
                         val packJob = async { MinedTvApi.creatorPack(clipId) }
@@ -102,6 +114,104 @@ class RemoteEnhanceRepository(
             }
         }
     }
+
+    /**
+     * The backend's stored-clip highlights (`POST/GET /clips/{id}/highlights`): it exports, picks the
+     * moment, crops to 9:16 and burns in captions; the phone only downloads it and adds the MinedIt
+     * end card. Returns null while the route isn't deployed (bare 404), so the caller falls back.
+     */
+    private suspend fun serverHighlights(
+        clipId: String,
+        request: EnhanceRequest,
+        jobId: String,
+        emit: (EnhanceJobStatus) -> Unit
+    ): EnhanceResult? {
+        val o = request.options
+        val platform = when (request.platform) { SharePlatform.TikTok -> "tiktok"; SharePlatform.InstagramReels -> "instagram"; SharePlatform.MinedIt -> "general" }
+        val style = o.captionStyle.name.lowercase()
+        val mode = if (o.montage) "montage" else "single"
+        val body = JSONObject().put("platform", platform).put("mode", mode)
+            .put("captions", o.captions).put("caption_style", style).put("hook", o.captions)
+        // The GET must repeat the POST's options exactly.
+        val query = "platform=$platform&mode=$mode&captions=${o.captions}&caption_style=$style&hook=${o.captions}"
+
+        var r = try {
+            MinedTvApi.post("/clips/$clipId/highlights", body)
+        } catch (e: ApiException) {
+            if (e.code == 404 && e.message?.contains("\"Not Found\"") == true) {
+                Logger.w("Server highlights not deployed yet; using the on-device editor")
+                return null
+            }
+            if (e.code == 403) throw ApiException(403, "AI edits only work on your own clips")
+            throw e
+        }
+        val started = System.currentTimeMillis()
+        while (r.optString("status") != "ready") {
+            if (r.optString("status") == "failed") throw ApiException(500, r.optString("error").ifBlank { "AI highlights failed" })
+            if (System.currentTimeMillis() - started > 15 * 60_000) throw ApiException(504, "AI highlights are taking too long, try again in a minute")
+            val p = r.optDouble("progress", 0.0).toFloat()
+            emit(
+                when (r.optString("stage")) {
+                    "queued", "exporting" -> EnhanceJobStatus.Uploading(p.coerceIn(0.05f, 1f))
+                    "analyzing" -> EnhanceJobStatus.Processing(EnhanceStage.AnalyzingTrends, p)
+                    "selecting" -> EnhanceJobStatus.Processing(EnhanceStage.DetectingHighlights, p)
+                    "captioning" -> EnhanceJobStatus.Processing(if (o.captions) EnhanceStage.Captioning else EnhanceStage.Rendering, p)
+                    else -> EnhanceJobStatus.Processing(EnhanceStage.Rendering, p)
+                }
+            )
+            kotlinx.coroutines.delay(3_000)
+            r = MinedTvApi.get("/clips/$clipId/highlights?$query")
+        }
+        Logger.i("Server highlights ready for $clipId: ${r.optInt("duration_ms")}ms, ${r.optJSONArray("captions")?.length() ?: 0} captions")
+
+        // Download, then add our end card on the phone.
+        emit(EnhanceJobStatus.Processing(EnhanceStage.Rendering, 0.9f))
+        val url = MinedTvApi.absoluteUrl(r.optString("download_url").ifBlank { r.getString("video_url") })
+        val dir = File(context.cacheDir, "share").apply { mkdirs() }
+        val server = dir.resolve("highlights_${clipId}_${platform}_$style.mp4")
+        MinedTvApi.download(url, server)
+        val out = if (request.creator.isBlank()) server else {
+            val ms = durationMs(server)
+            AiVideoEditor.render(
+                context, server,
+                AiVideoEditor.Edit(0, ms, vertical = true, captions = emptyList(), style = o.captionStyle, endCardHandle = request.creator)
+            ) { p -> emit(EnhanceJobStatus.Processing(EnhanceStage.Rendering, 0.9f + 0.1f * p)) }
+        }
+
+        val captions = r.optJSONArray("captions").objects().map {
+            CaptionSegment(it.getLong("start_ms"), it.getLong("end_ms"), it.getString("text"))
+        }
+        val tags = r.optJSONArray("hashtags").strings().map { "#" + it.trimStart('#').replace(" ", "") }
+        val hashtags = if (o.trendHashtags) {
+            (tags.take(6) + (when (request.platform) { SharePlatform.TikTok -> "#fyp"; SharePlatform.InstagramReels -> "#reels"; SharePlatform.MinedIt -> "#minedit" }) + "#minedit").distinct()
+        } else tags.take(2)
+        val insights = buildList {
+            r.optString("summary").takeIf { it.isNotBlank() && it != "null" }?.let { add("AI watched the clip: $it") }
+            if (o.montage) add("Montage of ${r.optJSONArray("moments")?.length() ?: 0} best moments, cut together in order")
+            r.optJSONArray("moments").objects().forEach { m ->
+                val from = formatDuration((m.getLong("source_start_ms") / 1000).toInt())
+                val to = formatDuration((m.getLong("source_end_ms") / 1000).toInt())
+                add((if (o.montage) "Moment $from–$to: " else "Picked $from–$to: ") + m.optString("reason"))
+            }
+            add("Reframed to 9:16 and edited on MinedIt's servers")
+            if (captions.isNotEmpty()) add("Burned in ${captions.size} caption lines" + if (o.captions) ", opening with a hook" else "")
+            if (out != server) add("Ends with a 2.5s MinedIt end card crediting @${request.creator.lowercase()}")
+        }
+        val w = r.optInt("width"); val h = r.optInt("height")
+        return EnhanceResult(
+            jobId = jobId,
+            videoUrl = out.absolutePath,
+            durationSeconds = (durationMs(out) / 1000).toInt(),
+            aspectRatio = if (h > w) "9:16" else "16:9",
+            captions = captions,
+            suggestedCaption = r.optString("suggested_caption").takeIf { it.isNotBlank() && it != "null" } ?: request.title,
+            hashtags = hashtags,
+            trendInsights = insights
+        )
+    }
+
+    private fun JSONArray?.objects(): List<JSONObject> = if (this == null) emptyList() else (0 until length()).map { getJSONObject(it) }
+    private fun JSONArray?.strings(): List<String> = if (this == null) emptyList() else (0 until length()).map { getString(it) }
 
     private class Plan(val edit: AiVideoEditor.Edit, val result: (String, File) -> EnhanceResult)
 
@@ -143,7 +253,7 @@ class RemoteEnhanceRepository(
 
         val tags = pack.optJSONArray("hashtags")?.let { a -> (0 until a.length()).map { "#" + a.getString(it).trimStart('#').replace(" ", "") } }.orEmpty()
         val hashtags = if (options.trendHashtags) {
-            (tags.take(6) + (if (platform == SharePlatform.TikTok) "#fyp" else "#reels") + "#minedtv").distinct()
+            (tags.take(6) + (when (platform) { SharePlatform.TikTok -> "#fyp"; SharePlatform.InstagramReels -> "#reels"; SharePlatform.MinedIt -> "#minedit" }) + "#minedit").distinct()
         } else tags.take(2)
 
         val seconds = ((end - start) / 1000).toInt() + 2 // + the end card (2.5 s)
@@ -154,7 +264,7 @@ class RemoteEnhanceRepository(
                 add("Trimmed ${formatDuration((sourceMs / 1000).toInt())} to ${seconds}s$at, the stretch with the most action and dialogue")
             } else add("Kept the full ${seconds}s: already short enough for ${platform.displayName}")
             if (options.reframe) add("Center-cropped to ${platform.aspectRatio} (720×1280) so it fills the screen")
-            add("Ends with a 2.5s MinedTv end card crediting @${request.creator.lowercase()}")
+            add("Ends with a 2.5s MinedIt end card crediting @${request.creator.lowercase()}")
             if (captions.isNotEmpty()) {
                 val from = if (cues.any { it.first in start until end }) "the clip's dialogue" else "the key moments"
                 add("Burned in ${captions.size} caption lines from $from, opening with a hook")

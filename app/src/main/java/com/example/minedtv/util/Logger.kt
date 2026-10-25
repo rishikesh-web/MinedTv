@@ -2,9 +2,9 @@ package com.example.minedtv.util
 
 import android.util.Log
 
-/** App-wide logging. Filter Logcat with `tag:MinedTv`. */
+/** App-wide logging. Filter Logcat with `tag:MinedIt`. */
 object Logger {
-    private const val TAG = "MinedTv"
+    private const val TAG = "MinedIt"
 
     fun d(message: String) = Log.d(TAG, message)
     fun i(message: String) = Log.i(TAG, message)

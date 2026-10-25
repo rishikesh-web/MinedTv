@@ -61,10 +61,12 @@ fun ProfileScreen(onClipClick: (Clip) -> Unit, onSearchClips: () -> Unit, onDash
                 remote = emptyList()
             }
     }
-    val tabs = if (live) listOf("Published", "Drafts", "On this phone") else listOf("Clips", "Highlights", "Liked")
+    val tabs = if (live) listOf("Published", "Drafts", "Nuggets", "Phone") else listOf("Clips", "Highlights", "Liked")
     val clips = if (live) when (tab) {
-        0 -> remote.orEmpty().filter { it.publishState == "published" }
-        1 -> remote.orEmpty().filter { it.publishState != "published" }
+        // Videos and reels are split like YouTube: reels get their own tab (published and drafts).
+        0 -> remote.orEmpty().filter { it.publishState == "published" && !it.isReel }
+        1 -> remote.orEmpty().filter { it.publishState != "published" && !it.isReel }
+        2 -> remote.orEmpty().filter { it.isReel }
         else -> local
     } else when (tab) {
         0 -> SampleData.myClips
@@ -147,7 +149,7 @@ fun ProfileScreen(onClipClick: (Clip) -> Unit, onSearchClips: () -> Unit, onDash
                 tab = it
             })
         }
-        if (live && (tab < 2 && remote == null)) {
+        if (live && (tab < 3 && remote == null)) {
             item(span = { GridItemSpan(maxLineSpan) }) {
                 Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = Gold) }
             }
@@ -155,8 +157,9 @@ fun ProfileScreen(onClipClick: (Clip) -> Unit, onSearchClips: () -> Unit, onDash
             item(span = { GridItemSpan(maxLineSpan) }) {
                 Text(
                     when (tab) {
-                        0 -> "Nothing published yet. Publish a draft to share it on MinedTv."
+                        0 -> "Nothing published yet. Publish a draft to share it on MinedIt."
                         1 -> "No drafts. Recordings you upload land here first."
+                        2 -> "No nuggets yet. Share a clip, pick MinedIt Nuggets, and post it."
                         else -> "No recordings on this phone yet. Start one from the Clip tab."
                     },
                     color = MaterialTheme.colorScheme.onSurfaceVariant,

@@ -45,6 +45,8 @@ data class RemoteNotification(
 object MinedTvApi {
     private val base = BuildConfig.API_BASE_URL.trimEnd('/')
     var userId: String = BuildConfig.DEMO_USER_ID
+    /** Random id kept per install, so views from phones on the same network count separately. */
+    var viewerId: String = ""
     val isConfigured: Boolean get() = BuildConfig.API_KEY.isNotEmpty()
 
     suspend fun get(path: String): JSONObject = JSONObject(request("GET", path))
@@ -60,6 +62,7 @@ object MinedTvApi {
                 readTimeout = 60_000 // first search after idle can take a while (GPU cold start)
                 setRequestProperty("X-API-Key", BuildConfig.API_KEY)
                 if (userId.isNotEmpty()) setRequestProperty("X-User-Id", userId)
+                if (viewerId.isNotEmpty()) setRequestProperty("X-Viewer-Id", viewerId)
                 setRequestProperty("Accept", "application/json")
                 // Cloud Run's front end rejects a POST without Content-Length (411), so always send one.
                 val bytes = body?.toString()?.toByteArray() ?: if (method == "POST") ByteArray(0) else null
@@ -83,6 +86,9 @@ object MinedTvApi {
         }
 
     fun q(value: String): String = URLEncoder.encode(value, "UTF-8")
+
+    /** Some asset URLs come back relative to the API ("/clips/…"); make them fetchable. */
+    fun absoluteUrl(url: String): String = if (url.startsWith("/")) base + url else url
 
     /** org.json returns the string "null" for JSON nulls from optString; this doesn't. */
     fun JSONObject.str(key: String): String? = if (!has(key) || isNull(key)) null else getString(key)
@@ -119,7 +125,15 @@ object MinedTvApi {
             likedByMe = !o.isNull("liked_by_me") && o.optBoolean("liked_by_me", false),
             publishState = o.str("publish_state"),
             publishedAt = o.str("published_at"),
-            userId = o.getJSONObject("user").str("id")
+            userId = o.getJSONObject("user").str("id"),
+            ageRestricted = o.optBoolean("age_restricted", false),
+            moderationSeverity = o.str("moderation_severity"),
+            moderationReason = o.str("moderation_reason"),
+            moderationViolationCount = o.optJSONArray("moderation_violations")?.length() ?: 0,
+            width = o.optInt("width"),
+            height = o.optInt("height"),
+            format = o.str("format"),
+            reelOf = o.str("reel_of")
         )
     }
 
@@ -138,14 +152,21 @@ object MinedTvApi {
 
     // --- endpoints ----------------------------------------------------------
 
-    suspend fun feed(cursor: String? = null, limit: Int = 20): Pair<List<Clip>, String?> {
-        val o = get("/feed?limit=$limit" + (cursor?.let { "&cursor=${q(it)}" } ?: ""))
+    /**
+     * Published clips. [format] "long" = regular videos (Home/Explore), "short" = reels;
+     * null = everything. [sort] "top" ranks by engagement + virality (Reels tab).
+     */
+    suspend fun feed(cursor: String? = null, limit: Int = 20, format: String? = null, sort: String? = null): Pair<List<Clip>, String?> {
+        val o = get(
+            "/feed?limit=$limit" + (format?.let { "&format=$it" } ?: "") + (sort?.let { "&sort=$it" } ?: "") +
+                (cursor?.let { "&cursor=${q(it)}" } ?: "")
+        )
         return clips(o.getJSONArray("items")) to o.str("next_cursor")
     }
 
     /** Published clips from one game, newest first. */
     suspend fun gameFeed(game: String, limit: Int = 12): List<Clip> =
-        clips(get("/feed?limit=$limit&game=${q(game)}").getJSONArray("items"))
+        clips(get("/feed?limit=$limit&format=long&game=${q(game)}").getJSONArray("items"))
 
     suspend fun userClips(userId: String = this.userId): List<Clip> =
         clips(get("/users/$userId/clips?limit=50").getJSONArray("items"))
@@ -158,8 +179,8 @@ object MinedTvApi {
     }
 
     /** The current user's own clips by publish state: draft, ready, published, unpublished or all. */
-    suspend fun myClips(state: String = "all"): List<Clip> =
-        clips(get("/users/$userId/clips?state=$state&limit=100").getJSONArray("items"))
+    suspend fun myClips(state: String = "all", format: String? = null): List<Clip> =
+        clips(get("/users/$userId/clips?state=$state&limit=100" + (format?.let { "&format=$it" } ?: "")).getJSONArray("items"))
 
     /** Owner only. Draft -> published (shows in feed and search). */
     suspend fun publish(remoteId: String): Clip = clipFrom(post("/clips/$remoteId/publish"))
@@ -227,7 +248,8 @@ object MinedTvApi {
     }
 
     /** Clips from people the user follows (Home "Following" tab). */
-    suspend fun followingFeed(limit: Int = 30): List<Clip> = clips(get("/feed/following?limit=$limit").getJSONArray("items"))
+    suspend fun followingFeed(limit: Int = 30, format: String? = null): List<Clip> =
+        clips(get("/feed/following?limit=$limit" + (format?.let { "&format=$it" } ?: "")).getJSONArray("items"))
 
     // --- notifications ---
 
@@ -315,7 +337,15 @@ object MinedTvApi {
      * Uploads a recording as a new session: create upload -> PUT the file to storage -> complete.
      * The worker then processes it (about a minute) and it shows up in the user's clips as a draft.
      */
-    suspend fun uploadRecording(file: File, game: String, title: String, onProgress: (Float) -> Unit = {}): String {
+    suspend fun uploadRecording(
+        file: File,
+        game: String,
+        title: String,
+        /** Upload as one whole reel (no auto-clipping), linked to the clip it was made from. */
+        asReel: Boolean = false,
+        reelOf: String? = null,
+        onProgress: (Float) -> Unit = {}
+    ): String {
         val up = post(
             "/uploads",
             JSONObject()
@@ -324,6 +354,10 @@ object MinedTvApi {
                 .put("game", game)
                 .put("title", title.take(200))
                 .put("size_bytes", file.length())
+                .apply {
+                    if (asReel) put("as_reel", true)
+                    reelOf?.let { put("reel_of", it) }
+                }
         )
         val sessionId = up.getString("session_id")
         withContext(Dispatchers.IO) {
@@ -347,6 +381,10 @@ object MinedTvApi {
         Logger.i("Uploaded ${file.name} (${file.length() / 1024} KB) -> session $sessionId")
         return sessionId
     }
+
+    /** Clips cut from an upload (a reel upload makes exactly one). */
+    suspend fun sessionClips(sessionId: String): List<Clip> =
+        myClips("all").filter { it.sessionId == sessionId }
 
     /** Session processing status: uploading, queued, ..., ready, failed. */
     suspend fun sessionStatus(sessionId: String): String = get("/sessions/$sessionId").getString("status")
@@ -389,6 +427,9 @@ object MinedTvApi {
             conn.disconnect()
         }
     }
+
+    /** True for sample clips and clips the acting user owns (export, creator pack and AI edits are owner-only). */
+    fun owns(clip: Clip): Boolean = clip.remoteId == null || clip.localPath != null || clip.userId == userId
 
     /** Wakes the search GPU so the first search is fast (~12 s when cold). Fire and forget. */
     suspend fun warmup() {

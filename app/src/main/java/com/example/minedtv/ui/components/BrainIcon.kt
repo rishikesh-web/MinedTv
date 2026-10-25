@@ -8,7 +8,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.addPathNodes
 import androidx.compose.ui.unit.dp
 
-// MinedTv logo mark: a brain ("Mined" -> "Mind"). 24x24 stroke path; the launcher icon
+// MinedIt logo mark: a brain ("Mined" -> "Mind"). 24x24 stroke path; the launcher icon
 // in res/drawable/ic_launcher_foreground.xml uses the same path data.
 internal const val BRAIN_PATH =
     // Left hemisphere

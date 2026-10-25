@@ -68,13 +68,17 @@ class FakeEnhanceRepository : EnhanceRepository {
             } else emptyList(),
             suggestedCaption = "${request.title} 🤯 would you have clutched this?",
             hashtags = if (options.trendHashtags) {
-                listOf(gameTag, "#gaming", "#clutch", platformTag, "#minedtv")
+                listOf(gameTag, "#gaming", "#clutch", platformTag, "#minedit")
             } else listOf(gameTag),
             trendInsights = when (platform) {
                 SharePlatform.TikTok -> listOf(
                     "Top ${request.game} clips this week hit the action within 1.5s, so we moved the highlight up front",
                     "Bold centered captions are trending in #gaming (+18% watch time)",
                     "Gaming clips around ${platform.idealSeconds}s are getting the best completion rate"
+                )
+                SharePlatform.MinedIt -> listOf(
+                    "Short vertical clips land in MinedIt's Nuggets tab, ranked by likes and virality",
+                    "Captions keep the moment readable with the sound off"
                 )
                 SharePlatform.InstagramReels -> listOf(
                     "Reels under ${platform.idealSeconds}s get the highest replay rate for gaming",

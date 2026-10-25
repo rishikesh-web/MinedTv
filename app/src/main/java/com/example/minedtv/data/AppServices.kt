@@ -25,5 +25,9 @@ object AppServices {
         if (MinedTvApi.isConfigured) searchRepository = RemoteSearchRepository()
         // Real AI edits (Gemini plan + on-device render); sample clips still use the simulation.
         enhanceRepository = RemoteEnhanceRepository(context.applicationContext)
+        // One random viewer id per install for view counting (X-Viewer-Id).
+        val prefs = context.getSharedPreferences("minedtv", Context.MODE_PRIVATE)
+        MinedTvApi.viewerId = prefs.getString("viewer_id", null)
+            ?: java.util.UUID.randomUUID().toString().also { prefs.edit().putString("viewer_id", it).apply() }
     }
 }

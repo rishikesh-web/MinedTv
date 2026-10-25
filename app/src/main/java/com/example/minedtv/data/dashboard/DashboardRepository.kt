@@ -14,7 +14,7 @@ import androidx.compose.runtime.mutableStateMapOf
  * Creator dashboard data. Today it's all generated locally.
  *
  * Backend mapping when it's ready:
- *  - published/unpublished on MinedTv: needs a publish state on clips (not in the API yet)
+ *  - published/unpublished on MinedIt: needs a publish state on clips (not in the API yet)
  *  - daily stats + traffic sources: needs snapshots/events on the backend (the API only has current view/like counts;
  *    no comments, shares or history yet)
  *  - simulate(): POST /clips/{id}/creator-pack (poll) -> POST /creator/simulate-analysis
@@ -23,7 +23,7 @@ interface DashboardRepository {
     /** True for the real backend, false for generated demo data. */
     val isLive: Boolean
     suspend fun clips(): List<DashboardClip>
-    /** Posts a draft to the MinedTv feed. */
+    /** Posts a draft to the MinedIt feed. */
     suspend fun publish(clip: Clip)
     /** Takes a published clip back to draft. */
     suspend fun unpublish(clip: Clip)

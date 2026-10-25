@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">MinedTv</string>
-    <string name="clip_button_service_label">MinedTv Clip button</string>
-    <string name="clip_button_service_description">Shows a floating Clip button over your games while MinedTv is recording, and notes which game is open so clips are labelled. It doesn\'t read what\'s on screen or act on your behalf.</string>
+    <string name="app_name">MinedIt</string>
+    <string name="clip_button_service_label">MinedIt Clip button</string>
+    <string name="clip_button_service_description">Shows a floating Clip button over your games while MinedIt is recording, and notes which game is open so clips are labelled. It doesn\'t read what\'s on screen or act on your behalf.</string>
 </resources>

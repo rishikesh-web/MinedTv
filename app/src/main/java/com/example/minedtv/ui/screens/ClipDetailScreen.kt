@@ -41,6 +41,9 @@ import com.example.minedtv.ui.components.LikeButton
 import com.example.minedtv.data.api.MinedTvApi
 import com.example.minedtv.ui.components.HlsPlayer
 import kotlinx.coroutines.launch
+import androidx.compose.material.icons.filled.Flag
+import com.example.minedtv.ui.moderation.ContentCheckScreen
+import com.example.minedtv.data.moderation.ContentCheck
 import com.example.minedtv.recorder.LocalClips
 import androidx.compose.material.icons.filled.Public
 import androidx.compose.material.icons.filled.Lock
@@ -68,16 +71,43 @@ fun ClipDetailScreen(clip: Clip, onBack: () -> Unit, onClipClick: (Clip) -> Unit
     var commentCount by remember(clip.id) { mutableIntStateOf(clip.comments) }
     var replyingTo by remember(clip.id) { mutableStateOf<Comment?>(null) }
     val isOwn = clip.localPath != null || (clip.userId != null && clip.userId == MinedTvApi.userId)
+    // Content check (moderation verdict + flagged moments) for the owner's upload.
+    var showCheck by remember(clip.id) { mutableStateOf(false) }
+    var confirmPublish by remember(clip.id) { mutableStateOf(false) }
     // Phone recordings: upload to the backend, where they're processed into a draft.
     var uploadSession by remember(clip.id) { mutableStateOf(clip.localPath?.let { LocalClips.uploadedSession(it) }) }
     var uploadProgress by remember(clip.id) { mutableStateOf<Float?>(null) }
     var uploadStatus by remember(clip.id) { mutableStateOf<String?>(null) }
+    var uploadReason by remember(clip.id) { mutableStateOf<String?>(null) }
     var uploadError by remember(clip.id) { mutableStateOf<String?>(null) }
+    val checkSession = uploadSession ?: clip.sessionId?.takeIf { isOwn && clip.remoteId != null }
+    if (showCheck && checkSession != null) {
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { showCheck = false },
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            ContentCheckScreen(
+                load = {
+                    ContentCheck.fromSession(
+                        MinedTvApi.get("/sessions/$checkSession"), clip.title,
+                        fallbackPlayUrl = clip.playlistUrl
+                    )
+                },
+                onClose = { showCheck = false }
+            )
+        }
+    }
+
     LaunchedEffect(uploadSession) {
         val sid = uploadSession ?: return@LaunchedEffect
         while (true) {
-            runCatching { MinedTvApi.sessionStatus(sid) }.onSuccess { uploadStatus = it }
-            if (uploadStatus == "ready" || uploadStatus == "failed") break
+            runCatching { MinedTvApi.get("/sessions/$sid") }.onSuccess { s ->
+                uploadStatus = s.optString("status")
+                uploadReason = s.optString("moderation_reason").takeIf { it.isNotBlank() && it != "null" }
+                    ?: s.optString("error").takeIf { it.isNotBlank() && it != "null" }
+            }
+            // blocked = moderation stopped processing (severe content); it's finished, not pending.
+            if (uploadStatus == "ready" || uploadStatus == "failed" || uploadStatus == "blocked") break
             kotlinx.coroutines.delay(10_000)
         }
         Logger.d("Upload session $sid: $uploadStatus")
@@ -266,8 +296,9 @@ fun ClipDetailScreen(clip: Clip, onBack: () -> Unit, onClipClick: (Clip) -> Unit
                             when {
                                 uploadProgress != null -> "Uploading… ${((uploadProgress ?: 0f) * 100).toInt()}%"
                                 sid == null -> "Only on this phone"
-                                uploadStatus == "ready" -> "Uploaded · in your drafts on MinedTv"
+                                uploadStatus == "ready" -> "Uploaded · in your drafts on MinedIt"
                                 uploadStatus == "failed" -> "Uploaded, but processing failed"
+                                uploadStatus == "blocked" -> "Blocked by moderation" + (uploadReason?.let { ": $it" } ?: "")
                                 else -> "Uploaded · processing (about a minute)…"
                             },
                             fontSize = 13.sp
@@ -298,6 +329,12 @@ fun ClipDetailScreen(clip: Clip, onBack: () -> Unit, onClipClick: (Clip) -> Unit
                             }
                         }) { Text("Upload", color = Gold, fontWeight = FontWeight.Bold) }
                     }
+                    if (sid != null) {
+                        TextButton(onClick = {
+                            Logger.d("Open content check for upload $sid")
+                            showCheck = true
+                        }) { Text("Content check", color = Gold, fontWeight = FontWeight.Bold) }
+                    }
                 }
             }
             if (clip.remoteId != null && clip.publishState != null && isOwn) item {
@@ -318,25 +355,68 @@ fun ClipDetailScreen(clip: Clip, onBack: () -> Unit, onClipClick: (Clip) -> Unit
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        if (published) "Published on MinedTv" else "Draft · only you can see this",
+                        if (published) "Published on MinedIt" else "Draft · only you can see this",
                         fontSize = 13.sp,
                         modifier = Modifier.weight(1f)
                     )
+                    fun togglePublish() {
+                        publishBusy = true
+                        scope.launch {
+                            runCatching {
+                                if (published) MinedTvApi.unpublish(clip.remoteId) else MinedTvApi.publish(clip.remoteId)
+                            }.onSuccess {
+                                publishState = it.publishState
+                                Logger.i("Clip ${clip.remoteId} is now ${it.publishState}")
+                            }.onFailure { Logger.e("Publish toggle failed", it) }
+                            publishBusy = false
+                        }
+                    }
                     TextButton(
                         enabled = !publishBusy,
-                        onClick = {
-                            publishBusy = true
-                            scope.launch {
-                                runCatching {
-                                    if (published) MinedTvApi.unpublish(clip.remoteId) else MinedTvApi.publish(clip.remoteId)
-                                }.onSuccess {
-                                    publishState = it.publishState
-                                    Logger.i("Clip ${clip.remoteId} is now ${it.publishState}")
-                                }.onFailure { Logger.e("Publish toggle failed", it) }
-                                publishBusy = false
-                            }
-                        }
+                        // 18+ clips need an explicit second step, like the web app.
+                        onClick = { if (!published && clip.ageRestricted) confirmPublish = true else togglePublish() }
                     ) { Text(if (published) "Unpublish" else "Publish", color = Gold, fontWeight = FontWeight.Bold) }
+                    if (confirmPublish) AlertDialog(
+                        onDismissRequest = { confirmPublish = false },
+                        title = { Text("Publish as 18+?") },
+                        text = {
+                            Text(
+                                "This clip was tagged 18+" + (clip.moderationReason?.let { ": $it" } ?: ".") +
+                                    " Only signed-in adults will see it in feeds and be able to open it."
+                            )
+                        },
+                        confirmButton = {
+                            TextButton(onClick = {
+                                confirmPublish = false
+                                Logger.i("Publishing 18+ clip ${clip.remoteId} after confirmation")
+                                togglePublish()
+                            }) { Text("Publish 18+", color = Gold) }
+                        },
+                        dismissButton = { TextButton(onClick = { confirmPublish = false }) { Text("Keep private") } }
+                    )
+                }
+            }
+            // Owner's view of the moderation verdict, with the flagged moments.
+            if (clip.remoteId != null && clip.sessionId != null && isOwn) item {
+                val (label, color) = when (clip.moderationSeverity) {
+                    "mild" -> "Tagged 18+" + (if (clip.moderationViolationCount > 0) " · ${clip.moderationViolationCount} flagged moments" else "") to Color(0xFFFAB219)
+                    "severe" -> "Blocked by moderation" to LiveRed
+                    else -> "Content check: clean" to MaterialTheme.colorScheme.onSurfaceVariant
+                }
+                Row(
+                    Modifier
+                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surface)
+                        .clickable { showCheck = true }
+                        .padding(horizontal = 12.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Filled.Flag, null, tint = color, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(label, fontSize = 13.sp, color = if (clip.moderationSeverity == null || clip.moderationSeverity == "none") MaterialTheme.colorScheme.onSurfaceVariant else Color.White, modifier = Modifier.weight(1f))
+                    Text("View", color = Gold, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                 }
             }
             item {
@@ -351,7 +431,8 @@ fun ClipDetailScreen(clip: Clip, onBack: () -> Unit, onClipClick: (Clip) -> Unit
                         Logger.d("Clip ${if (liked) "liked" else "unliked"}: id=${clip.id}")
                     }
                     StatAction(Icons.Outlined.ChatBubbleOutline, formatCount(if (isRemote) commentCount else clip.comments + comments.size - SampleData.comments.size))
-                    StatAction(Icons.Outlined.Share, "Share") { onShare(clip) }
+                    // Export and AI edits are owner-only on the backend.
+                    if (MinedTvApi.owns(clip)) StatAction(Icons.Outlined.Share, "Share") { onShare(clip) }
                     StatAction(
                         if (saved) Icons.Filled.Bookmark else Icons.Outlined.BookmarkBorder,
                         if (saved) "Saved" else "Save",

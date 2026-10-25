@@ -13,7 +13,9 @@ enum class SharePlatform(
     val colors: List<Color>
 ) {
     TikTok("TikTok", 600, 25, "9:16", listOf(Color(0xFF25F4EE), Color(0xFF000000), Color(0xFFFE2C55))),
-    InstagramReels("Instagram Reels", 180, 20, "9:16", listOf(Color(0xFFF58529), Color(0xFFDD2A7B), Color(0xFF8134AF)))
+    InstagramReels("Instagram Reels", 180, 20, "9:16", listOf(Color(0xFFF58529), Color(0xFFDD2A7B), Color(0xFF8134AF))),
+    /** MinedIt's own short-video feed: the AI edit is uploaded as a reel of the clip and published. */
+    MinedIt("MinedIt Nuggets", 60, 25, "9:16", listOf(Color(0xFFFFC53D), Color(0xFFFF9F1C)))
 }
 
 enum class ShareMode { Direct, AiEnhanced }
@@ -28,7 +30,9 @@ data class EnhanceOptions(
     val autoTrim: Boolean = true,
     val targetSeconds: Int = 25,
     val trendHashtags: Boolean = true,
-    val trendingAudio: Boolean = false
+    val trendingAudio: Boolean = false,
+    /** Server cut: false = the single best moment, true = a montage of the best moments. */
+    val montage: Boolean = false
 )
 
 enum class EnhanceStage(val label: String) {
@@ -64,7 +68,7 @@ data class EnhanceRequest(
     val sessionId: String? = null,
     val startMs: Long = 0,
     val endMs: Long = 0,
-    /** Handle shown on the MinedTv end card. */
+    /** Handle shown on the MinedIt end card. */
     val creator: String = ""
 )
 

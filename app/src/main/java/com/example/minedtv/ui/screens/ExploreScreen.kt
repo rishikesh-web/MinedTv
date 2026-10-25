@@ -56,7 +56,7 @@ fun ExploreScreen(onClipClick: (Clip) -> Unit) {
     // Live: games and trending clips come from the real feed.
     var feedClips by remember { mutableStateOf<List<Clip>?>(null) }
     LaunchedEffect(Unit) {
-        if (MinedTvApi.isConfigured) runCatching { MinedTvApi.feed(limit = 50).first }
+        if (MinedTvApi.isConfigured) runCatching { MinedTvApi.feed(limit = 50, format = "long").first }
             .onSuccess { feedClips = it }
             .onFailure { Logger.e("Explore feed failed", it) }
     }

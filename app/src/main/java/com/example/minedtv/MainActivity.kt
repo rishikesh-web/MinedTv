@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.PlayCircle
+import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -89,10 +91,12 @@ class MainActivity : ComponentActivity() {
 
 enum class Tab(val label: String, val icon: ImageVector, val selectedIcon: ImageVector) {
     Home("Home", Icons.Outlined.Home, Icons.Filled.Home),
-    Explore("Explore", Icons.Outlined.Explore, Icons.Filled.Explore),
+    Reels("Nuggets", Icons.Outlined.PlayCircle, Icons.Filled.PlayCircle),
     Clipper("Clip", Icons.Outlined.Videocam, Icons.Filled.Videocam),
-    Inbox("Inbox", Icons.Outlined.Notifications, Icons.Filled.Notifications),
-    Profile("Profile", Icons.Outlined.Person, Icons.Filled.Person)
+    Explore("Explore", Icons.Outlined.Explore, Icons.Filled.Explore),
+    Profile("Profile", Icons.Outlined.Person, Icons.Filled.Person),
+    /** Not in the bottom bar: opened from the bell on Home. */
+    Inbox("Inbox", Icons.Outlined.Notifications, Icons.Filled.Notifications)
 }
 
 @Composable
@@ -152,6 +156,10 @@ fun MinedTvApp() {
                         onNotifications = { tab = Tab.Inbox }
                     )
                     Tab.Explore -> ExploreScreen(onClipClick)
+                    Tab.Reels -> ReelsScreen(onOpenClip = onClipClick, onShare = {
+                        shareSession++
+                        shareClip = it
+                    })
                     Tab.Clipper -> ClipperScreen(onClipClick, onSearchClips = { showMomentSearch = true })
                     Tab.Inbox -> InboxScreen(onClipClick)
                     Tab.Profile -> ProfileScreen(
@@ -182,7 +190,7 @@ fun MinedTvApp() {
             }
         }
 
-        // Creator dashboard (MinedTv stats, drafts, virality predictions).
+        // Creator dashboard (MinedIt stats, drafts, virality predictions).
         AnimatedVisibility(
             visible = showDashboard,
             enter = slideInVertically { it },
@@ -248,7 +256,7 @@ private fun AnimatedBottomBar(selected: Tab, onSelect: (Tab) -> Unit) {
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Tab.entries.forEach { t ->
+        Tab.entries.filter { it != Tab.Inbox }.forEach { t ->
             val isSelected = t == selected
             if (t == Tab.Clipper) {
                 // Highlighted center record action, like Medal's.

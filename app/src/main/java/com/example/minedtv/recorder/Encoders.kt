@@ -43,7 +43,7 @@ class VideoEncoder(
         codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
         surface = codec.createInputSurface()
         codec.start()
-        thread = Thread(::drain, "MinedTv-video").apply { start() }
+        thread = Thread(::drain, "MinedIt-video").apply { start() }
     }
 
     private fun drain() {
@@ -147,7 +147,7 @@ class AudioEncoder(
     fun start() {
         game?.startRecording()
         micRecord?.startRecording()
-        thread = Thread(::loop, "MinedTv-audio").apply { start() }
+        thread = Thread(::loop, "MinedIt-audio").apply { start() }
     }
 
     private fun loop() {

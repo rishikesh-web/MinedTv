@@ -38,7 +38,7 @@ import kotlin.coroutines.resumeWithException
  * Renders the AI edit on the phone with Media3 Transformer: trims to the chosen window,
  * center-crops to 9:16 and burns in the captions. The server decides *what* to do (Gemini
  * creator pack); the phone does the pixel work, so no server-side render is needed.
- * Every edit ends with a short MinedTv end card ([EndCard]), like TikTok's outro.
+ * Every edit ends with a short MinedIt end card ([EndCard]), like TikTok's outro.
  */
 @OptIn(UnstableApi::class)
 object AiVideoEditor {

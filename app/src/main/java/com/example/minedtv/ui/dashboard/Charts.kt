@@ -182,6 +182,99 @@ fun TrendChart(
     }
 }
 
+private fun clock(ms: Long) = "%d:%02d".format(ms / 60_000, ms / 1000 % 60)
+
+/**
+ * Virality moment by moment: one 0-100 score per sampled frame over the clip's time, fixed
+ * 0/50/100 axis, the peak always marked. Tap or drag horizontally for a crosshair and tooltip.
+ */
+@Composable
+fun MomentCurve(points: List<Pair<Long, Float>>, peakMs: Long?, modifier: Modifier = Modifier) {
+    val measurer = rememberTextMeasurer()
+    var selected by remember(points) { mutableStateOf<Int?>(null) }
+    val axisStyle = TextStyle(color = DashboardColors.AxisText, fontSize = 11.sp)
+    val peakStyle = TextStyle(color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+    val tipTitle = TextStyle(color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+    val tipBody = TextStyle(color = Color(0xFFC3C2B7), fontSize = 11.sp)
+    val leftPadDp = 34.dp
+    val bottomPadDp = 22.dp
+    val endMs = points.lastOrNull()?.first?.coerceAtLeast(1) ?: 1
+
+    fun indexAt(x: Float, width: Float, left: Float): Int {
+        val t = ((x - left) / (width - left)).coerceIn(0f, 1f) * endMs
+        return points.indices.minByOrNull { kotlin.math.abs(points[it].first - t) } ?: 0
+    }
+
+    Canvas(
+        modifier
+            .fillMaxWidth()
+            .height(180.dp)
+            .pointerInput(points) { detectTapGestures { selected = indexAt(it.x, size.width.toFloat(), leftPadDp.toPx()) } }
+            .pointerInput(points) {
+                detectHorizontalDragGestures(onDragEnd = {}, onHorizontalDrag = { change, _ ->
+                    selected = indexAt(change.position.x, size.width.toFloat(), leftPadDp.toPx())
+                    change.consume()
+                })
+            }
+    ) {
+        if (points.size < 2) return@Canvas
+        val left = leftPadDp.toPx()
+        val bottom = size.height - bottomPadDp.toPx()
+        val top = 22.dp.toPx() // room for the peak label
+        fun xOf(ms: Long) = left + (size.width - left) * ms / endMs.toFloat()
+        fun yOf(v: Float) = bottom - (bottom - top) * v.coerceIn(0f, 100f) / 100f
+
+        listOf(0f, 50f, 100f).forEach { v ->
+            val y = yOf(v)
+            drawLine(if (v == 0f) DashboardColors.Baseline else DashboardColors.Grid, Offset(left, y), Offset(size.width, y), 1.dp.toPx())
+            val label = measurer.measure(v.toInt().toString(), axisStyle)
+            drawText(label, topLeft = Offset(left - 8.dp.toPx() - label.size.width, y - label.size.height / 2))
+        }
+        listOf(0L, endMs / 2, endMs).forEach { ms ->
+            val label = measurer.measure(clock(ms), axisStyle)
+            val x = (xOf(ms) - label.size.width / 2).coerceIn(left, size.width - label.size.width)
+            drawText(label, topLeft = Offset(x, bottom + 6.dp.toPx()))
+        }
+        val line = Path()
+        points.forEachIndexed { i, (ms, v) -> if (i == 0) line.moveTo(xOf(ms), yOf(v)) else line.lineTo(xOf(ms), yOf(v)) }
+        val area = Path().apply {
+            addPath(line)
+            lineTo(xOf(points.last().first), bottom)
+            lineTo(xOf(points.first().first), bottom)
+            close()
+        }
+        drawPath(area, Brush.verticalGradient(listOf(Gold.copy(alpha = 0.24f), Gold.copy(alpha = 0f)), startY = top, endY = bottom))
+        drawPath(line, Gold, style = Stroke(2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
+
+        // Peak: ringed marker + direct label (the one point worth naming).
+        val peak = peakMs?.let { p -> points.minByOrNull { kotlin.math.abs(it.first - p) } } ?: points.maxBy { it.second }
+        val px = xOf(peak.first); val py = yOf(peak.second)
+        drawCircle(Surface, 6.dp.toPx(), Offset(px, py))
+        drawCircle(Gold, 4.dp.toPx(), Offset(px, py))
+        val pl = measurer.measure("Peak ${clock(peak.first)}", peakStyle)
+        drawText(pl, topLeft = Offset((px - pl.size.width / 2).coerceIn(left, size.width - pl.size.width), (py - pl.size.height - 8.dp.toPx()).coerceAtLeast(0f)))
+
+        selected?.let { i ->
+            val (ms, v) = points[i]
+            val x = xOf(ms); val y = yOf(v)
+            drawLine(DashboardColors.AxisText, Offset(x, top), Offset(x, bottom), 1.dp.toPx())
+            drawCircle(Surface, 6.dp.toPx(), Offset(x, y))
+            drawCircle(Gold, 4.dp.toPx(), Offset(x, y))
+            val title = measurer.measure("Score ${v.roundToInt()}", tipTitle)
+            val body = measurer.measure("at ${clock(ms)}", tipBody)
+            val pad = 8.dp.toPx()
+            val w = maxOf(title.size.width, body.size.width) + pad * 2
+            val h = title.size.height + body.size.height + pad * 2
+            val tx = (x - w / 2).coerceIn(left, size.width - w)
+            val ty = (y - h - 12.dp.toPx()).coerceAtLeast(0f)
+            drawRoundRect(SurfaceHigh, Offset(tx, ty), Size(w, h), CornerRadius(8.dp.toPx()))
+            drawRoundRect(Color.White.copy(alpha = 0.10f), Offset(tx, ty), Size(w, h), CornerRadius(8.dp.toPx()), style = Stroke(1.dp.toPx()))
+            drawText(title, topLeft = Offset(tx + pad, ty + pad))
+            drawText(body, topLeft = Offset(tx + pad, ty + pad + title.size.height))
+        }
+    }
+}
+
 /** Part-to-whole: one horizontal stacked bar with 2dp surface gaps, plus a labelled legend. */
 @Composable
 fun SourceSplitBar(parts: List<Pair<TrafficSource, Long>>, modifier: Modifier = Modifier) {

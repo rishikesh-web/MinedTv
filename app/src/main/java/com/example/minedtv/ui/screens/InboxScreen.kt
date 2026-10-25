@@ -100,7 +100,7 @@ fun InboxScreen(onClipClick: (Clip) -> Unit) {
                             .padding(horizontal = 16.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Avatar(n.actor ?: "MinedTv", 44.dp)
+                        Avatar(n.actor ?: "MinedIt", 44.dp)
                         Spacer(Modifier.width(12.dp))
                         Text(
                             buildAnnotatedString {
