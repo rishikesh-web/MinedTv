@@ -2,9 +2,9 @@
 
 **Record it. Mine it. Post it.**
 
-[![Watch the MinedIt launch video (40 s)](docs/minedit-launch.jpg)](docs/minedit-launch.mp4)
+[![MinedIt preview: Nuggets, Enhance with AI and more (click for the full video)](docs/minedit-preview.gif)](docs/minedit-launch.mp4)
 
-▶ **[Watch the 40-second launch video](docs/minedit-launch.mp4)**
+▶ **[Watch the full 40-second launch video](docs/minedit-launch.mp4)**
 
 MinedIt is an Android gaming-clip app (think Medal.tv) with an AI brain. It records your gameplay in the background, lets you search *inside* your clips for what happened, cuts the best moments into captioned 9:16 videos, scores how viral a clip looks and flags 18+ content before you post.
 
